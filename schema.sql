@@ -24,6 +24,7 @@ CREATE TYPE review_direction AS ENUM ('client_to_expert', 'expert_to_client');
 -- 1. USER TABLE
 CREATE TABLE users (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    password VARCHAR(255) NOT NULL,
     full_name VARCHAR(255) NOT NULL,
     email VARCHAR(255) UNIQUE NOT NULL,
     role user_role NOT NULL,
