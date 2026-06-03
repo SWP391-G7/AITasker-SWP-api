@@ -1,6 +1,7 @@
 const app = require('./app');
 const { testConnection } = require('./config/db');
 const { initDatabase } = require('./config/setupDb');
+const { initializeEmailService } = require('./utils/emailService');
 require('dotenv').config();
 
 const PORT = process.env.PORT || 5000;
@@ -15,7 +16,11 @@ async function startServer() {
     // 2. Setup schema and tables from schema.sql
     await initDatabase();
     
-    // 3. Start listening for requests
+    // 3. Initialize email service
+    await initializeEmailService();
+    console.log('Email service initialized successfully');
+    
+    // 4. Start listening for requests
     app.listen(PORT, () => {
       console.log(`===============================================`);
       console.log(`🚀 Server successfully running on port ${PORT}`);

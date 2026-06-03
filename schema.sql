@@ -197,6 +197,17 @@ CREATE TABLE disputes (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- EMAIL VERIFICATION TABLE
+CREATE TABLE email_verification_codes (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    email VARCHAR(255) NOT NULL,
+    code VARCHAR(6) NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    expires_at TIMESTAMP NOT NULL,
+    is_used BOOLEAN DEFAULT false,
+    UNIQUE(email)
+);
+
 -- ==========================================
 -- PERFORMANCE OPTIMIZATION INDEXES
 -- ==========================================
@@ -205,3 +216,4 @@ CREATE INDEX idx_job_posts_status ON job_posts(status);
 CREATE INDEX idx_services_expert ON services(expert_id);
 CREATE INDEX idx_proposals_job ON proposals(job_id);
 CREATE INDEX idx_messages_conversation ON messages(conversation_id);
+CREATE INDEX idx_email_verification_email ON email_verification_codes(email);
