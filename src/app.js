@@ -2,6 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const { errorHandler } = require('./middleware/errorMiddleware');
 const authRoutes = require('./routes/authRoutes');
+const profileRoutes = require('./routes/profileRoutes');
 
 const app = express();
 
@@ -27,6 +28,7 @@ app.get('/api/health', (req, res) => {
 
 // 3. Mount modular routes
 app.use('/api/auth', authRoutes);
+app.use('/api/profile', profileRoutes);
 
 // 4. Handle 404 Route Not Found
 app.use((req, res, next) => {

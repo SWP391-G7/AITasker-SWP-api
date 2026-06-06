@@ -35,16 +35,21 @@ CREATE TABLE users (
 -- 2. EXPERT PROFILE TABLE
 CREATE TABLE expert_profiles (
     id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
-    bio TEXT,
+    professional_title VARCHAR(255),
     skills TEXT,
-    ai_specializations TEXT,
+    experience VARCHAR(100),
+    portfolio_url VARCHAR(255),
     hourly_rate VARCHAR(50),
+    bio TEXT,
+    ai_specializations TEXT,
     avg_rating REAL DEFAULT 0.0
 );
 
 -- 3. CLIENT PROFILE TABLE
 CREATE TABLE client_profiles (
     id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    company_name VARCHAR(255),
+    industry VARCHAR(255),
     bio TEXT
 );
 

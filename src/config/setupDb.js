@@ -50,6 +50,16 @@ async function initDatabase() {
     const alterQuery = 'ALTER TABLE users ADD COLUMN IF NOT EXISTS password VARCHAR(255);';
     await client.query(alterQuery);
     console.log('Password column checked/added successfully.');
+
+    // Ensure client_profiles and expert_profiles have the new onboarding columns
+    console.log('Ensuring client_profiles and expert_profiles have onboarding columns...');
+    await client.query('ALTER TABLE client_profiles ADD COLUMN IF NOT EXISTS company_name VARCHAR(255);');
+    await client.query('ALTER TABLE client_profiles ADD COLUMN IF NOT EXISTS industry VARCHAR(255);');
+    
+    await client.query('ALTER TABLE expert_profiles ADD COLUMN IF NOT EXISTS professional_title VARCHAR(255);');
+    await client.query('ALTER TABLE expert_profiles ADD COLUMN IF NOT EXISTS experience VARCHAR(100);');
+    await client.query('ALTER TABLE expert_profiles ADD COLUMN IF NOT EXISTS portfolio_url VARCHAR(255);');
+    console.log('Onboarding columns checked/added successfully.');
     
   } catch (err) {
     console.error('Error during database initialization:', err);
