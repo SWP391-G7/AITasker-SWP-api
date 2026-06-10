@@ -1,4 +1,5 @@
 const { pool } = require('../config/db');
+const { generateToken } = require('../utils/token');
 
 /**
  * @desc    Get user profile details (client, expert, or both)
@@ -209,8 +210,94 @@ const updateExpertProfile = async (req, res, next) => {
   }
 };
 
+/**
+ * @desc    Update user role and initialize profile
+ * @route   PUT /api/profile/role
+ * @access  Private
+ */
+const updateUserRole = async (req, res, next) => {
+  const userId = req.user.id;
+  const { role } = req.body;
+
+  const validRoles = ['client', 'expert'];
+  if (!role || !validRoles.includes(role)) {
+    const err = new Error('Role must be one of: client, expert');
+    err.statusCode = 400;
+    return next(err);
+  }
+
+  const dbClient = await pool.connect();
+
+  try {
+    await dbClient.query('BEGIN');
+
+    // 1. Update user role
+    const updateRoleQuery = `
+      UPDATE users
+      SET role = $1
+      WHERE id = $2
+      RETURNING id, full_name, email, role, is_verified, created_at;
+    `;
+    const userRes = await dbClient.query(updateRoleQuery, [role, userId]);
+
+    if (userRes.rows.length === 0) {
+      const err = new Error('User not found');
+      err.statusCode = 404;
+      return next(err);
+    }
+
+    const updatedUser = userRes.rows[0];
+
+    // 2. Ensure profile entry exists
+    if (role === 'client') {
+      const insertClientProfileQuery = `
+        INSERT INTO client_profiles (id) 
+        VALUES ($1) 
+        ON CONFLICT (id) DO NOTHING;
+      `;
+      await dbClient.query(insertClientProfileQuery, [userId]);
+    } else if (role === 'expert') {
+      const insertExpertProfileQuery = `
+        INSERT INTO expert_profiles (id) 
+        VALUES ($1) 
+        ON CONFLICT (id) DO NOTHING;
+      `;
+      await dbClient.query(insertExpertProfileQuery, [userId]);
+    }
+
+    await dbClient.query('COMMIT');
+
+    const token = generateToken({
+      id: updatedUser.id,
+      email: updatedUser.email,
+      role: updatedUser.role
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: 'Role updated successfully',
+      user: {
+        id: updatedUser.id,
+        fullName: updatedUser.full_name,
+        email: updatedUser.email,
+        role: updatedUser.role,
+        isVerified: updatedUser.is_verified,
+        createdAt: updatedUser.created_at
+      },
+      token
+    });
+
+  } catch (err) {
+    await dbClient.query('ROLLBACK');
+    return next(err);
+  } finally {
+    dbClient.release();
+  }
+};
+
 module.exports = {
   getUserProfile,
   updateClientProfile,
-  updateExpertProfile
+  updateExpertProfile,
+  updateUserRole
 };

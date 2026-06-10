@@ -1,5 +1,6 @@
 const { pool } = require('../config/db');
 const { sendVerificationCode } = require('../utils/emailService');
+const { generateToken } = require('../utils/token');
 
 const generateVerificationCode = () => {
   return Math.floor(100000 + Math.random() * 900000).toString();
@@ -121,6 +122,12 @@ const verifyCode = async (req, res, next) => {
 
     const user = userRes.rows[0];
 
+    const token = generateToken({
+      id: user.id,
+      email: user.email,
+      role: user.role
+    });
+
     return res.status(200).json({
       success: true,
       message: 'Email verified successfully',
@@ -130,7 +137,8 @@ const verifyCode = async (req, res, next) => {
         email: user.email,
         role: user.role,
         isVerified: user.is_verified
-      }
+      },
+      token
     });
 
   } catch (err) {
