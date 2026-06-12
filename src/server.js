@@ -26,6 +26,7 @@ async function startServer() {
       console.log(`Server successfully running on port ${PORT}`)
       console.log(`Health check: http://localhost:${PORT}/api/health`)
       console.log(`Auth endpoints: http://localhost:${PORT}/api/auth`)
+      console.log(`SwaggerUI api check: http://localhost:${PORT}/api-docs`)
       console.log(`===============================================`)
     })
 
