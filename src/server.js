@@ -1,39 +1,39 @@
-const app = require('./app');
-const { testConnection } = require('./config/db');
-const { initDatabase } = require('./config/setupDb');
-const { initializeEmailService } = require('./utils/emailService');
-require('dotenv').config();
+const app = require('./app')
+const { testConnection } = require('./config/db')
+const { initDatabase } = require('./config/setupDb')
+const { initializeEmailService } = require('./utils/emailService')
+require('dotenv').config()
 
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT || 5000
 
 async function startServer() {
   try {
-    console.log('Starting AITasker Backend API...');
-    
+    console.log('Starting AITasker Backend API...')
+
     // 1. Verify connection to PostgreSQL
-    await testConnection();
-    
+    await testConnection()
+
     // 2. Setup schema and tables from schema.sql
-    await initDatabase();
-    
+    await initDatabase()
+
     // 3. Initialize email service
-    await initializeEmailService();
-    console.log('Email service initialized successfully');
-    
+    await initializeEmailService()
+    console.log('Email service initialized successfully')
+
     // 4. Start listening for requests
     app.listen(PORT, () => {
-      console.log(`===============================================`);
-      console.log(`🚀 Server successfully running on port ${PORT}`);
-      console.log(`👉 Health check: http://localhost:${PORT}/api/health`);
-      console.log(`👉 Auth endpoints: http://localhost:${PORT}/api/auth`);
-      console.log(`===============================================`);
-    });
-    
+      console.log(`===============================================`)
+      console.log(`Server successfully running on port ${PORT}`)
+      console.log(`Health check: http://localhost:${PORT}/api/health`)
+      console.log(`Auth endpoints: http://localhost:${PORT}/api/auth`)
+      console.log(`===============================================`)
+    })
+
   } catch (err) {
-    console.error('Fatal Error during startup, shutting down:', err.message);
-    process.exit(1);
+    console.error('Fatal Error during startup, shutting down:', err.message)
+    process.exit(1)
   }
 }
 
 // Start the backend server lifecycle
-startServer();
+startServer()
