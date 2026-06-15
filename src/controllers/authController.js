@@ -167,23 +167,15 @@ const login = async (req, res, next) => {
       return next(err)
     }
 
-    // 3. Check if user email is verified
-    if (!user.is_verified) {
-      const err = new Error('Email not verified')
-      err.statusCode = 403
-      err.isVerificationRequired = true
-      err.email = user.email
-      return next(err)
-    }
-
-    // 4. Generate token
+    // 3. Generate token (login is allowed even for unverified users;
+    //    the frontend will redirect them to /verify based on isVerified flag)
     const token = generateToken({
       id: user.id,
       email: user.email,
       role: user.role
     })
 
-    // 5. Return successful response
+    // 4. Return successful response
     return res.status(200).json({
       success: true,
       message: 'Login successful',
