@@ -51,12 +51,6 @@ async function initDatabase() {
     await client.query(alterQuery);
     console.log('Password column checked/added successfully.');
 
-    // Add is_expert column to the users table if it does not already exist
-    console.log('Ensuring users table has "is_expert" column...');
-    const alterIsExpertQuery = 'ALTER TABLE users ADD COLUMN IF NOT EXISTS is_expert BOOLEAN DEFAULT false;';
-    await client.query(alterIsExpertQuery);
-    console.log('is_expert column checked/added successfully.');
-
     // Ensure client_profiles and expert_profiles have the new onboarding columns
     console.log('Ensuring client_profiles and expert_profiles have onboarding columns...');
     await client.query('ALTER TABLE client_profiles ADD COLUMN IF NOT EXISTS company_name VARCHAR(255);');

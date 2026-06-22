@@ -30,7 +30,7 @@ const updateFullname = async (req, res, next) => {
       UPDATE users 
       SET full_name = $1 
       WHERE id = $2 
-      RETURNING id, full_name, email, role, is_verified, is_expert, created_at;
+      RETURNING id, full_name, email, role, is_verified, created_at;
     `;
     const userRes = await pool.query(updateQuery, [fullName.trim(), userId]);
 
@@ -51,7 +51,6 @@ const updateFullname = async (req, res, next) => {
         email: updatedUser.email,
         role: updatedUser.role,
         isVerified: updatedUser.is_verified,
-        isExpert: updatedUser.is_expert,
         createdAt: updatedUser.created_at
       }
     });
@@ -148,7 +147,7 @@ const updateEmail = async (req, res, next) => {
       UPDATE users
       SET email = $1, is_verified = true
       WHERE id = $2
-      RETURNING id, full_name, email, role, is_verified, is_expert, created_at;
+      RETURNING id, full_name, email, role, is_verified, created_at;
     `;
     const userRes = await dbClient.query(updateUserQuery, [normalizedEmail, userId]);
 
@@ -179,7 +178,6 @@ const updateEmail = async (req, res, next) => {
         email: updatedUser.email,
         role: updatedUser.role,
         isVerified: updatedUser.is_verified,
-        isExpert: updatedUser.is_expert,
         createdAt: updatedUser.created_at
       },
       token
@@ -298,150 +296,8 @@ const updatePassword = async (req, res, next) => {
   }
 };
 
-/**
- * @desc    Switch user role between client and expert
- * @route   POST /api/users/switch-role
- * @access  Private
- */
-const switchRole = async (req, res, next) => {
-  const userId = req.user.id;
-  const dbClient = await pool.connect();
-
-  try {
-    await dbClient.query('BEGIN');
-
-    // 1. Fetch current role and is_expert status from database
-    const userQuery = 'SELECT id, role, is_expert, email, full_name, is_verified, created_at FROM users WHERE id = $1';
-    const userRes = await dbClient.query(userQuery, [userId]);
-
-    if (userRes.rows.length === 0) {
-      const err = new Error('User not found');
-      err.statusCode = 404;
-      await dbClient.query('ROLLBACK');
-      return next(err);
-    }
-
-    const user = userRes.rows[0];
-    const currentRole = user.role;
-    const isExpert = user.is_expert;
-
-    if (currentRole === 'client') {
-      // If role is client, check is_expert
-      if (isExpert) {
-        // Switch role to expert
-        const updateRoleQuery = `
-          UPDATE users 
-          SET role = 'expert' 
-          WHERE id = $1 
-          RETURNING id, full_name, email, role, is_verified, is_expert, created_at;
-        `;
-        const updateRes = await dbClient.query(updateRoleQuery, [userId]);
-        const updatedUser = updateRes.rows[0];
-
-        // Ensure expert profile exists
-        const insertProfileQuery = `
-          INSERT INTO expert_profiles (id) 
-          VALUES ($1) 
-          ON CONFLICT (id) DO NOTHING;
-        `;
-        await dbClient.query(insertProfileQuery, [userId]);
-
-        await dbClient.query('COMMIT');
-
-        // Generate new token
-        const token = generateToken({
-          id: updatedUser.id,
-          email: updatedUser.email,
-          role: updatedUser.role
-        });
-
-        return res.status(200).json({
-          success: true,
-          roleSwitched: true,
-          role: 'expert',
-          user: {
-            id: updatedUser.id,
-            fullName: updatedUser.full_name,
-            email: updatedUser.email,
-            role: updatedUser.role,
-            isVerified: updatedUser.is_verified,
-            isExpert: updatedUser.is_expert,
-            createdAt: updatedUser.created_at
-          },
-          token
-        });
-      } else {
-        // is_expert is false, don't switch role
-        await dbClient.query('COMMIT');
-        return res.status(200).json({
-          success: true,
-          roleSwitched: false,
-          message: 'You are not verified to be an AI Expert. Do you want to become an AI Expert?'
-        });
-      }
-    } else if (currentRole === 'expert') {
-      // If role is expert, switch to client
-      const updateRoleQuery = `
-        UPDATE users 
-        SET role = 'client' 
-        WHERE id = $1 
-        RETURNING id, full_name, email, role, is_verified, is_expert, created_at;
-      `;
-      const updateRes = await dbClient.query(updateRoleQuery, [userId]);
-      const updatedUser = updateRes.rows[0];
-
-      // Ensure client profile exists
-      const insertProfileQuery = `
-        INSERT INTO client_profiles (id) 
-        VALUES ($1) 
-        ON CONFLICT (id) DO NOTHING;
-      `;
-      await dbClient.query(insertProfileQuery, [userId]);
-
-      await dbClient.query('COMMIT');
-
-      // Generate new token
-      const token = generateToken({
-        id: updatedUser.id,
-        email: updatedUser.email,
-        role: updatedUser.role
-      });
-
-      return res.status(200).json({
-        success: true,
-        roleSwitched: true,
-        role: 'client',
-        user: {
-          id: updatedUser.id,
-          fullName: updatedUser.full_name,
-          email: updatedUser.email,
-          role: updatedUser.role,
-          isVerified: updatedUser.is_verified,
-          isExpert: updatedUser.is_expert,
-          createdAt: updatedUser.created_at
-        },
-        token
-      });
-    } else {
-      // If role is admin or anything else
-      await dbClient.query('COMMIT');
-      return res.status(400).json({
-        success: false,
-        message: `Role switching is not supported for role: ${currentRole}`
-      });
-    }
-
-  } catch (err) {
-    await dbClient.query('ROLLBACK');
-    return next(err);
-  } finally {
-    dbClient.release();
-  }
-};
-
 module.exports = {
   updateFullname,
   updateEmail,
-  updatePassword,
-  switchRole
+  updatePassword
 };

@@ -67,16 +67,15 @@ const register = async (req, res, next) => {
 
     // Insert user into users table
     const insertUserQuery = `
-      INSERT INTO users (full_name, email, role, password, is_expert)
-      VALUES ($1, $2, $3, $4, $5)
-      RETURNING id, full_name, email, role, is_verified, is_expert, created_at;
+      INSERT INTO users (full_name, email, role, password)
+      VALUES ($1, $2, $3, $4)
+      RETURNING id, full_name, email, role, is_verified, created_at;
     `
     const userRes = await dbClient.query(insertUserQuery, [
       fullName.trim(),
       normalizedEmail,
       role,
-      hashedPassword,
-      role === 'expert'
+      hashedPassword
     ])
 
     const newUser = userRes.rows[0]
@@ -110,7 +109,6 @@ const register = async (req, res, next) => {
         email: newUser.email,
         role: newUser.role,
         isVerified: newUser.is_verified,
-        isExpert: newUser.is_expert,
         createdAt: newUser.created_at
       },
       token
@@ -189,7 +187,6 @@ const login = async (req, res, next) => {
         email: user.email,
         role: user.role,
         isVerified: user.is_verified,
-        isExpert: user.is_expert,
         createdAt: user.created_at
       },
       token
@@ -209,7 +206,7 @@ const getMe = async (req, res, next) => {
   try {
     // req.user has already been populated by authMiddleware (protect)
     const findUserQuery = `
-      SELECT id, full_name, email, role, is_verified, is_expert, created_at 
+      SELECT id, full_name, email, role, is_verified, created_at 
       FROM users 
       WHERE id = $1
     `
@@ -231,7 +228,6 @@ const getMe = async (req, res, next) => {
         email: user.email,
         role: user.role,
         isVerified: user.is_verified,
-        isExpert: user.is_expert,
         createdAt: user.created_at
       }
     })
@@ -321,9 +317,9 @@ const googleLogin = async (req, res, next) => {
 
         // Insert new user as 'client' by default (consistent with web sign up)
         const insertUserQuery = `
-          INSERT INTO users (full_name, email, role, password, is_verified, is_expert)
-          VALUES ($1, $2, $3, $4, $5, $6)
-          RETURNING id, full_name, email, role, is_verified, is_expert, created_at;
+          INSERT INTO users (full_name, email, role, password, is_verified)
+          VALUES ($1, $2, $3, $4, $5)
+          RETURNING id, full_name, email, role, is_verified, created_at;
         `
         // Since Google verified the email, we set is_verified to true
         const insertUserRes = await dbClient.query(insertUserQuery, [
@@ -331,8 +327,7 @@ const googleLogin = async (req, res, next) => {
           normalizedEmail,
           'client',
           hashedPassword,
-          true,
-          false
+          true
         ])
 
         user = insertUserRes.rows[0]
@@ -366,7 +361,6 @@ const googleLogin = async (req, res, next) => {
         email: user.email,
         role: user.role,
         isVerified: user.is_verified,
-        isExpert: user.is_expert,
         createdAt: user.created_at
       },
       token
