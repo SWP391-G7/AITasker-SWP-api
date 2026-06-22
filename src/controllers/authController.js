@@ -1,6 +1,8 @@
 const bcrypt = require('bcryptjs')
 const { pool } = require('../config/db')
 const { generateToken } = require('../utils/token')
+const { OAuth2Client } = require('google-auth-library')
+const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID)
 
 /**
  * Helper to validate email format
@@ -234,8 +236,148 @@ const getMe = async (req, res, next) => {
   }
 }
 
+/**
+ * @desc    Authenticate with Google & get token
+ * @route   POST /api/auth/google
+ * @access  Public
+ */
+const googleLogin = async (req, res, next) => {
+  const { idToken, accessToken } = req.body
+
+  if (!idToken && !accessToken) {
+    const err = new Error('Google token (idToken or accessToken) is required')
+    err.statusCode = 400
+    return next(err)
+  }
+
+  try {
+    let payload
+
+    if (idToken) {
+      // Verify the Google ID Token
+      const ticket = await googleClient.verifyIdToken({
+        idToken,
+        audience: process.env.GOOGLE_CLIENT_ID
+      })
+
+      payload = ticket.getPayload()
+    } else {
+      // Fetch user profile info from Google UserInfo endpoint using Access Token
+      const response = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+        headers: {
+          'Authorization': `Bearer ${accessToken}`
+        }
+      })
+
+      if (!response.ok) {
+        throw new Error('Failed to verify access token with Google')
+      }
+
+      payload = await response.json()
+    }
+
+    if (!payload) {
+      const err = new Error('Invalid Google token payload')
+      err.statusCode = 400
+      return next(err)
+    }
+
+    const { email, name } = payload
+    
+    if (!email) {
+      const err = new Error('Google token must contain email')
+      err.statusCode = 400
+      return next(err)
+    }
+
+    const normalizedEmail = email.toLowerCase().trim()
+
+    // Find user by email
+    const findUserQuery = 'SELECT * FROM users WHERE email = $1'
+    const userRes = await pool.query(findUserQuery, [normalizedEmail])
+
+    let user;
+    let isNewUser = false;
+
+    if (userRes.rows.length > 0) {
+      user = userRes.rows[0]
+    } else {
+      // Create a new user with Google account details
+      isNewUser = true
+      
+      // Generate a secure random password to satisfy db NOT NULL constraint
+      const randomPassword = require('crypto').randomBytes(16).toString('hex')
+      const salt = await bcrypt.genSalt(10)
+      const hashedPassword = await bcrypt.hash(randomPassword, salt)
+
+      const dbClient = await pool.connect()
+
+      try {
+        await dbClient.query('BEGIN')
+
+        // Insert new user as 'client' by default (consistent with web sign up)
+        const insertUserQuery = `
+          INSERT INTO users (full_name, email, role, password, is_verified)
+          VALUES ($1, $2, $3, $4, $5)
+          RETURNING id, full_name, email, role, is_verified, created_at;
+        `
+        // Since Google verified the email, we set is_verified to true
+        const insertUserRes = await dbClient.query(insertUserQuery, [
+          name ? name.trim() : 'Google User',
+          normalizedEmail,
+          'client',
+          hashedPassword,
+          true
+        ])
+
+        user = insertUserRes.rows[0]
+
+        // Create default client profile
+        const insertClientProfileQuery = 'INSERT INTO client_profiles (id) VALUES ($1)'
+        await dbClient.query(insertClientProfileQuery, [user.id])
+
+        await dbClient.query('COMMIT')
+      } catch (transactionErr) {
+        await dbClient.query('ROLLBACK')
+        throw transactionErr
+      } finally {
+        dbClient.release()
+      }
+    }
+
+    // Generate JWT token
+    const token = generateToken({
+      id: user.id,
+      email: user.email,
+      role: user.role
+    })
+
+    return res.status(isNewUser ? 201 : 200).json({
+      success: true,
+      message: isNewUser ? 'Registration and Login successful' : 'Login successful',
+      user: {
+        id: user.id,
+        fullName: user.full_name,
+        email: user.email,
+        role: user.role,
+        isVerified: user.is_verified,
+        createdAt: user.created_at
+      },
+      token
+    })
+
+  } catch (err) {
+    console.error('Google verification error:', err)
+    const verificationError = new Error('Google token verification failed')
+    verificationError.statusCode = 401
+    return next(verificationError)
+  }
+}
+
+
 module.exports = {
   register,
   login,
-  getMe
+  getMe,
+  googleLogin
 }
