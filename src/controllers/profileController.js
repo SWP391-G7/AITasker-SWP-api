@@ -12,7 +12,7 @@ const getUserProfile = async (req, res, next) => {
   try {
     // 1. Fetch user general information
     const userQuery = `
-      SELECT id, full_name, email, role, is_verified, created_at 
+      SELECT id, full_name, email, role, is_verified, is_expert, created_at 
       FROM users 
       WHERE id = $1
     `;
@@ -49,6 +49,7 @@ const getUserProfile = async (req, res, next) => {
         email: user.email,
         role: user.role,
         isVerified: user.is_verified,
+        isExpert: user.is_expert,
         createdAt: user.created_at
       },
       clientProfile: clientProfile ? {
@@ -234,9 +235,9 @@ const updateUserRole = async (req, res, next) => {
     // 1. Update user role
     const updateRoleQuery = `
       UPDATE users
-      SET role = $1
+      SET role = $1, is_expert = CASE WHEN $1 = 'expert' THEN true ELSE is_expert END
       WHERE id = $2
-      RETURNING id, full_name, email, role, is_verified, created_at;
+      RETURNING id, full_name, email, role, is_verified, is_expert, created_at;
     `;
     const userRes = await dbClient.query(updateRoleQuery, [role, userId]);
 
@@ -282,6 +283,7 @@ const updateUserRole = async (req, res, next) => {
         email: updatedUser.email,
         role: updatedUser.role,
         isVerified: updatedUser.is_verified,
+        isExpert: updatedUser.is_expert,
         createdAt: updatedUser.created_at
       },
       token
