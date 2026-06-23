@@ -41,6 +41,20 @@ const getUserProfile = async (req, res, next) => {
     const hasClientProfile = !!(clientProfile && (clientProfile.company_name || clientProfile.industry || clientProfile.bio));
     const hasExpertProfile = !!(expertProfile && (expertProfile.professional_title || expertProfile.skills || expertProfile.bio));
 
+    // 5. Fetch associated services if expert
+    let services = [];
+    if (hasExpertProfile) {
+      const servicesRes = await pool.query('SELECT * FROM services WHERE expert_id = $1 ORDER BY id DESC', [userId]);
+      services = servicesRes.rows;
+    }
+
+    // 6. Fetch associated job posts if client
+    let projects = [];
+    if (hasClientProfile) {
+      const projectsRes = await pool.query('SELECT * FROM job_posts WHERE client_id = $1 ORDER BY id DESC', [userId]);
+      projects = projectsRes.rows;
+    }
+
     return res.status(200).json({
       success: true,
       user: {
@@ -68,7 +82,28 @@ const getUserProfile = async (req, res, next) => {
         avgRating: expertProfile.avg_rating
       } : null,
       hasClientProfile,
-      hasExpertProfile
+      hasExpertProfile,
+      services: services.map(s => ({
+        id: s.id,
+        title: s.title,
+        description: s.description,
+        price: s.price,
+        pricingType: s.pricing_type,
+        deliveryDays: s.delivery_days,
+        tags: s.tags,
+        avgRating: s.avg_rating
+      })),
+      projects: projects.map(p => ({
+        id: p.id,
+        title: p.title,
+        description: p.description,
+        budgetMin: p.budget_min,
+        budgetMax: p.budget_max,
+        requiredSkill: p.required_skill,
+        durationDays: p.duration_days,
+        status: p.status,
+        deadline: p.deadline
+      }))
     });
 
   } catch (err) {
