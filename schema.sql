@@ -28,8 +28,8 @@ CREATE TABLE users (
     full_name VARCHAR(255) NOT NULL,
     email VARCHAR(255) UNIQUE NOT NULL,
     role user_role NOT NULL,
-    is_verified BOOLEAN DEFAULT false,
     is_expert BOOLEAN DEFAULT false,
+    is_verified BOOLEAN DEFAULT false,
     created_at DATE DEFAULT CURRENT_DATE
 );
 
