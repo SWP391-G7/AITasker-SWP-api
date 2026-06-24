@@ -235,11 +235,11 @@ const updateUserRole = async (req, res, next) => {
     // 1. Update user role
     const updateRoleQuery = `
       UPDATE users
-      SET role = $1, is_expert = CASE WHEN $1 = 'expert' THEN true ELSE is_expert END
-      WHERE id = $2
+      SET role = $1, is_expert = CASE WHEN $2 = 'expert' THEN true ELSE is_expert END
+      WHERE id = $3
       RETURNING id, full_name, email, role, is_verified, is_expert, created_at;
     `;
-    const userRes = await dbClient.query(updateRoleQuery, [role, userId]);
+    const userRes = await dbClient.query(updateRoleQuery, [role, role, userId]);
 
     if (userRes.rows.length === 0) {
       const err = new Error('User not found');

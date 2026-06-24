@@ -91,7 +91,7 @@ const updateEmail = async (req, res, next) => {
     // 1. Check if email is already taken by another user
     const checkEmailQuery = 'SELECT id FROM users WHERE email = $1 AND id != $2';
     const checkEmailRes = await dbClient.query(checkEmailQuery, [normalizedEmail, userId]);
-    
+
     if (checkEmailRes.rows.length > 0) {
       const err = new Error('Email is already in use by another account');
       err.statusCode = 400;
