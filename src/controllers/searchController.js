@@ -50,6 +50,7 @@ const searchEntities = async (req, res, next) => {
 
   try {
     if (target === 'jobs') {
+      const includeClosed = req.query.includeClosed === 'true' || req.query.showClosed === 'true';
       queryText = `
         SELECT j.*, c.company_name, u.full_name as client_name
         FROM job_posts j
@@ -57,6 +58,9 @@ const searchEntities = async (req, res, next) => {
         LEFT JOIN users u ON c.id = u.id
         WHERE 1=1
       `;
+      if (!includeClosed) {
+        queryText += " AND j.status != 'closed'";
+      }
 
       if (query && query.trim() !== '') {
         values.push(`%${query.trim()}%`);

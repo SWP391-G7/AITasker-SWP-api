@@ -322,9 +322,101 @@ const deleteProposal = async (req, res, next) => {
   }
 }
 
+/**
+ * @desc    Update a proposal's status (Accept / Reject)
+ * @route   PUT /api/proposals/:id/status
+ * @access  Private (Owner client of the job post only)
+ */
+const updateProposalStatus = async (req, res, next) => {
+  const { id } = req.params;
+  const userId = req.user.id;
+  const userRole = req.user.role;
+  let { status } = req.body;
+
+  if (!status) {
+    const err = new Error('Status is required');
+    err.statusCode = 400;
+    return next(err);
+  }
+
+  // Normalize approved -> accepted
+  if (status === 'approved') {
+    status = 'accepted';
+  }
+
+  if (status !== 'accepted' && status !== 'rejected') {
+    const err = new Error('Invalid status. Status must be one of: accepted, approved, rejected');
+    err.statusCode = 400;
+    return next(err);
+  }
+
+  try {
+    // 1. Fetch proposal and join with job post to verify ownership
+    const proposalQuery = `
+      SELECT p.*, j.client_id, j.status as job_status
+      FROM proposals p
+      JOIN job_posts j ON p.job_id = j.id
+      WHERE p.id = $1
+    `;
+    const proposalRes = await pool.query(proposalQuery, [id]);
+
+    if (proposalRes.rows.length === 0) {
+      const err = new Error('Proposal not found');
+      err.statusCode = 404;
+      return next(err);
+    }
+
+    const proposal = proposalRes.rows[0];
+
+    // Verify ownership: client of the job post, or admin
+    if (proposal.client_id !== userId && userRole !== 'admin') {
+      const err = new Error('Forbidden: You can only update proposals for your own job posts');
+      err.statusCode = 403;
+      return next(err);
+    }
+
+    // 2. Start transaction
+    await pool.query('BEGIN');
+
+    // 3. Update the proposal status
+    const updateProposalQuery = `
+      UPDATE proposals
+      SET status = $1
+      WHERE id = $2
+      RETURNING *;
+    `;
+    const updatedProposalRes = await pool.query(updateProposalQuery, [status, id]);
+    const updatedProposal = updatedProposalRes.rows[0];
+
+    // 4. If status is accepted, update the job post status to 'closed'
+    if (status === 'accepted') {
+      const updateJobQuery = `
+        UPDATE job_posts
+        SET status = 'closed'
+        WHERE id = $1
+        RETURNING *;
+      `;
+      await pool.query(updateJobQuery, [proposal.job_id]);
+    }
+
+    await pool.query('COMMIT');
+
+    return res.status(200).json({
+      success: true,
+      message: `Proposal status updated to ${status} successfully.`,
+      proposal: updatedProposal
+    });
+
+  } catch (error) {
+    await pool.query('ROLLBACK');
+    return next(error);
+  }
+};
+
 module.exports = {
   createProposal,
   getProposalsByJob,
   updateProposal,
-  deleteProposal
+  deleteProposal,
+  updateProposalStatus
 }
