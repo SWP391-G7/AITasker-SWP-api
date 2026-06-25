@@ -288,10 +288,10 @@ async function seedDatabase() {
     
     // Conversation for Project 1
     const convRes1 = await client.query(`
-      INSERT INTO conversations (project_id, content)
-      VALUES ($1, 'Brain Tumor Image Segmentation Project Room')
+      INSERT INTO conversations (sender_id, target_id, content)
+      VALUES ($1, $2, 'Brain Tumor Image Segmentation Project Room')
       RETURNING id;
-    `, [project1Id]);
+    `, [clientIds['client2@example.com'], expertIds['expert1@example.com']]);
     const conv1Id = convRes1.rows[0].id;
 
     // Messages
@@ -305,10 +305,10 @@ async function seedDatabase() {
 
     // Conversation for Project 2
     const convRes2 = await client.query(`
-      INSERT INTO conversations (project_id, content)
-      VALUES ($1, 'Math Chatbot Project Room')
+      INSERT INTO conversations (sender_id, target_id, content)
+      VALUES ($1, $2, 'Math Chatbot Project Room')
       RETURNING id;
-    `, [project2Id]);
+    `, [clientIds['client3@example.com'], expertIds['expert4@example.com']]);
     const conv2Id = convRes2.rows[0].id;
 
     await client.query(`

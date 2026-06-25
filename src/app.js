@@ -9,6 +9,8 @@ const jobRoutes = require('./routes/jobRoutes')
 const searchRoutes = require('./routes/searchRoutes')
 const serviceRoutes = require('./routes/serviceRoutes')
 const userRoutes = require('./routes/userRoutes')
+const conversationRoutes = require('./routes/conversationRoutes')
+const messageRoutes = require('./routes/messageRoutes')
 
 const app = express()
 
@@ -40,6 +42,8 @@ app.use('/api/jobs', jobRoutes)
 app.use('/api/search', searchRoutes)
 app.use('/api/services', serviceRoutes)
 app.use('/api/users', userRoutes)
+app.use('/api/conversations', conversationRoutes)
+app.use('/api/messages', messageRoutes)
 
 // Handle 404 Route Not Found
 app.use((req, res, next) => {
