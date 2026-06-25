@@ -187,11 +187,11 @@ const updateProposal = async (req, res, next) => {
   const userId = req.user.id
   const userRole = req.user.role
 
-  if (userRole !== 'expert' && userRole !== 'admin') {
-    const err = new Error('Forbidden: Only experts can update proposals.')
-    err.statusCode = 403
-    return next(err)
-  }
+  // if (userRole !== 'expert' && userRole !== 'admin') {
+  //   const err = new Error('Forbidden: Only experts can update proposals.')
+  //   err.statusCode = 403
+  //   return next(err)
+  // }
 
   const { cover_letter, bid_amount, delivery_days } = req.body
 
