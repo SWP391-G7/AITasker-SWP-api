@@ -195,33 +195,52 @@ const updateProposal = async (req, res, next) => {
 
   const { cover_letter, bid_amount, delivery_days } = req.body
 
-  // Validation
+  // Validation — only validate fields that are provided
   const errors = {}
+  const fieldsToUpdate = []
+  const values = []
+  let paramIndex = 1
 
-  let parsedBidAmount = null
-  if (bid_amount === undefined || bid_amount === null || bid_amount === '') {
-    errors.bid_amount = 'Bid amount is required'
-  } else {
-    parsedBidAmount = parseFloat(bid_amount)
+  // Check cover_letter if provided
+  if (cover_letter !== undefined) {
+    fieldsToUpdate.push(`cover_letter = $${paramIndex++}`)
+    values.push(cover_letter ? cover_letter.trim() : null)
+  }
+
+  // Check bid_amount if provided
+  if (bid_amount !== undefined && bid_amount !== null && bid_amount !== '') {
+    const parsedBidAmount = parseFloat(bid_amount)
     if (isNaN(parsedBidAmount) || parsedBidAmount <= 0) {
       errors.bid_amount = 'Bid amount must be a positive number'
+    } else {
+      fieldsToUpdate.push(`bid_amount = $${paramIndex++}`)
+      values.push(parsedBidAmount)
     }
   }
 
-  let parsedDeliveryDays = null
-  if (delivery_days === undefined || delivery_days === null || delivery_days === '') {
-    errors.delivery_days = 'Delivery days is required'
-  } else {
-    parsedDeliveryDays = parseInt(delivery_days, 10)
+  // Check delivery_days if provided
+  if (delivery_days !== undefined && delivery_days !== null && delivery_days !== '') {
+    const parsedDeliveryDays = parseInt(delivery_days, 10)
     if (isNaN(parsedDeliveryDays) || parsedDeliveryDays <= 0) {
       errors.delivery_days = 'Delivery days must be a positive integer'
+    } else {
+      fieldsToUpdate.push(`delivery_days = $${paramIndex++}`)
+      values.push(parsedDeliveryDays)
     }
   }
 
+  // Return validation errors if any
   if (Object.keys(errors).length > 0) {
     const err = new Error('Validation failed')
     err.statusCode = 400
     err.errors = errors
+    return next(err)
+  }
+
+  // Require at least one field to update
+  if (fieldsToUpdate.length === 0) {
+    const err = new Error('At least one field (cover_letter, bid_amount, or delivery_days) must be provided to update')
+    err.statusCode = 400
     return next(err)
   }
 
@@ -240,19 +259,14 @@ const updateProposal = async (req, res, next) => {
       return next(err)
     }
 
-    // Update
+    // Dynamically build UPDATE query with only the provided fields
+    values.push(id)
     const updateQuery = `
       UPDATE proposals
-      SET cover_letter = $1, bid_amount = $2, delivery_days = $3
-      WHERE id = $4
+      SET ${fieldsToUpdate.join(', ')}
+      WHERE id = $${paramIndex}
       RETURNING *;
     `
-    const values = [
-      cover_letter ? cover_letter.trim() : null,
-      parsedBidAmount,
-      parsedDeliveryDays,
-      id
-    ]
 
     const result = await pool.query(updateQuery, values)
     return res.status(200).json({
