@@ -147,10 +147,11 @@ CREATE TABLE milestones (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
     title VARCHAR(255) NOT NULL,
+    content TEXT,
     amount NUMERIC(10, 2) NOT NULL,
     status milestone_status DEFAULT 'pending',
     due_date TIMESTAMP,
-    deliverable TEXT
+    deliverable BOOLEAN DEFAULT false
 );
 
 -- 13. TRANSACTION TABLE
