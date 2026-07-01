@@ -388,14 +388,31 @@ const updateProposalStatus = async (req, res, next) => {
     const updatedProposalRes = await pool.query(updateProposalQuery, [status, id]);
     const updatedProposal = updatedProposalRes.rows[0];
 
-    // 4. If status is accepted, handle project creation / job status
-    let project = null;
+    let createdProject = null;
+
+    // 4. If status is accepted, handle job status and project creation
     if (status === 'accepted') {
-      if (start_project === true || start_project === 'true') {
-        // Create the project automatically
+      if (start_project === false) {
+        // Set job status to 'pending'
+        const updateJobQuery = `
+          UPDATE job_posts
+          SET status = 'pending'
+          WHERE id = $1;
+        `;
+        await pool.query(updateJobQuery, [proposal.job_id]);
+      } else {
+        // Set job status to 'closed'
+        const updateJobQuery = `
+          UPDATE job_posts
+          SET status = 'closed'
+          WHERE id = $1;
+        `;
+        await pool.query(updateJobQuery, [proposal.job_id]);
+
+        // Auto create project
         const insertProjectQuery = `
-          INSERT INTO projects (expert_id, client_id, type, status, total_amount, title, description, start_date)
-          VALUES ($1, $2, 'fixed_milestone', 'active', $3, $4, $5, CURRENT_TIMESTAMP)
+          INSERT INTO projects (expert_id, client_id, type, status, total_amount, title, description)
+          VALUES ($1, $2, 'fixed_milestone', 'active', $3, $4, $5)
           RETURNING *;
         `;
         const projectRes = await pool.query(insertProjectQuery, [
@@ -405,19 +422,7 @@ const updateProposalStatus = async (req, res, next) => {
           proposal.job_title,
           proposal.job_description
         ]);
-        project = projectRes.rows[0];
-
-        // Delete the job post (cascading deletes proposals)
-        await pool.query('DELETE FROM job_posts WHERE id = $1', [proposal.job_id]);
-      } else {
-        // Client does not want to start project immediately -> display in pending status
-        const updateJobQuery = `
-          UPDATE job_posts
-          SET status = 'pending'
-          WHERE id = $1
-          RETURNING *;
-        `;
-        await pool.query(updateJobQuery, [proposal.job_id]);
+        createdProject = projectRes.rows[0];
       }
     }
 
@@ -427,7 +432,7 @@ const updateProposalStatus = async (req, res, next) => {
       success: true,
       message: `Proposal status updated to ${status} successfully.`,
       proposal: updatedProposal,
-      project
+      project: createdProject
     });
 
   } catch (error) {
