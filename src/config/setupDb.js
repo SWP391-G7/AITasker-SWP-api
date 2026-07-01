@@ -61,6 +61,25 @@ async function initDatabase() {
     await client.query('ALTER TABLE expert_profiles ADD COLUMN IF NOT EXISTS portfolio_url VARCHAR(255);');
     console.log('Onboarding columns checked/added successfully.');
     
+    // Add pending status to job_status enum
+    console.log('Ensuring job_status enum has "pending" status...');
+    try {
+      await client.query("ALTER TYPE job_status ADD VALUE 'pending';");
+      console.log('Added pending status to job_status enum.');
+    } catch (err) {
+      if (err.code !== '42710') {
+        console.warn('Non-fatal warning adding pending status to job_status enum:', err.message);
+      } else {
+        console.log('Pending status already exists in job_status enum.');
+      }
+    }
+
+    // Add title and description to projects table
+    console.log('Ensuring projects table has title and description columns...');
+    await client.query('ALTER TABLE projects ADD COLUMN IF NOT EXISTS title VARCHAR(255);');
+    await client.query('ALTER TABLE projects ADD COLUMN IF NOT EXISTS description TEXT;');
+    console.log('Projects table columns checked/added successfully.');
+
   } catch (err) {
     console.error('Error during database initialization:', err);
     throw err;

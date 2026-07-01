@@ -11,6 +11,10 @@ const serviceRoutes = require('./routes/serviceRoutes')
 const userRoutes = require('./routes/userRoutes')
 const proposalRoutes = require('./routes/proposalRoutes')
 const projectRoutes = require('./routes/projectRoutes')
+<<<<<<< Updated upstream
+=======
+const milestoneRoutes = require('./routes/milestoneRoutes')
+>>>>>>> Stashed changes
 
 const app = express()
 
@@ -44,6 +48,10 @@ app.use('/api/services', serviceRoutes)
 app.use('/api/users', userRoutes)
 app.use('/api/proposals', proposalRoutes)
 app.use('/api/projects', projectRoutes)
+<<<<<<< Updated upstream
+=======
+app.use('/api/milestones', milestoneRoutes)
+>>>>>>> Stashed changes
 
 // Handle 404 Route Not Found
 app.use((req, res, next) => {

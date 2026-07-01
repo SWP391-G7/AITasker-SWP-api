@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+<<<<<<< Updated upstream
 const {
   createProject,
   getMyProjects,
@@ -19,5 +20,27 @@ router.put('/:id', protect, updateProject);
 
 // DELETE /api/projects/:id - Delete an existing project
 router.delete('/:id', protect, deleteProject);
+=======
+const { protect } = require('../middleware/authMiddleware');
+const {
+  createProject,
+  getMyProjects,
+  getProjectById,
+  updateProject,
+  deleteProject
+} = require('../controllers/projectController');
+
+// All project routes require authentication
+router.use(protect);
+
+router.route('/')
+  .post(createProject)
+  .get(getMyProjects);
+
+router.route('/:id')
+  .get(getProjectById)
+  .put(updateProject)
+  .delete(deleteProject);
+>>>>>>> Stashed changes
 
 module.exports = router;

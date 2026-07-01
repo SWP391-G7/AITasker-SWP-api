@@ -184,10 +184,16 @@ const getJobById = async (req, res, next) => {
       return next(err)
     }
 
+    const jobPost = result.rows[0]
+    // If the job is in pending status, only show it as pending to the client owner; show as closed to anyone else
+    if (jobPost.status === 'pending' && (!req.user || jobPost.client_id !== req.user.id)) {
+      jobPost.status = 'closed';
+    }
+
     return res.status(200).json({
       success: true,
-      jobPost: result.rows[0],
-      data: result.rows[0]
+      jobPost: jobPost,
+      data: jobPost
     })
   } catch (error) {
     return next(error)
