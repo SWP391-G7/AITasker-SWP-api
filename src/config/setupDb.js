@@ -74,6 +74,19 @@ async function initDatabase() {
       }
     }
 
+    // Add closed status to job_status enum
+    console.log('Ensuring job_status enum has "closed" status...');
+    try {
+      await client.query("ALTER TYPE job_status ADD VALUE 'closed';");
+      console.log('Added closed status to job_status enum.');
+    } catch (err) {
+      if (err.code !== '42710') {
+        console.warn('Non-fatal warning adding closed status to job_status enum:', err.message);
+      } else {
+        console.log('Closed status already exists in job_status enum.');
+      }
+    }
+
     // Add title and description to projects table
     console.log('Ensuring projects table has title and description columns...');
     await client.query('ALTER TABLE projects ADD COLUMN IF NOT EXISTS title VARCHAR(255);');

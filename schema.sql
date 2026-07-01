@@ -6,7 +6,7 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 -- ==========================================
 CREATE TYPE user_role AS ENUM ('client', 'expert', 'admin');
 CREATE TYPE pricing_type AS ENUM ('fixed', 'hourly');
-CREATE TYPE job_status AS ENUM ('open', 'closed');
+CREATE TYPE job_status AS ENUM ('open', 'active', 'completed', 'cancelled', 'closed');
 CREATE TYPE proposal_status AS ENUM ('pending', 'accepted', 'rejected');
 CREATE TYPE ai_module_type AS ENUM ('job_assistant', 'service_generator', 'matchmaking');
 CREATE TYPE project_type AS ENUM ('fixed_milestone', 'hourly_contract');

@@ -153,14 +153,14 @@ async function seedDatabase() {
 
     const jobRes2 = await client.query(`
       INSERT INTO job_posts (client_id, title, description, budget_min, budget_max, required_skill, duration_days, status, deadline)
-      VALUES ($1, 'AI Medical Image Segmentation Model', 'Train a model (e.g. UNet) on MRI scans to segment brain tumors. Vetted experts only with medical AI background. Data is annotated.', 3000.00, 8000.00, 'Computer Vision, PyTorch', 30, 'open', NOW() + INTERVAL '45 days')
+      VALUES ($1, 'AI Medical Image Segmentation Model', 'Train a model (e.g. UNet) on MRI scans to segment brain tumors. Vetted experts only with medical AI background. Data is annotated.', 3000.00, 8000.00, 'Computer Vision, PyTorch', 30, 'closed', NOW() + INTERVAL '45 days')
       RETURNING id;
     `, [clientIds['client2@example.com']]);
     const job2Id = jobRes2.rows[0].id;
 
     const jobRes3 = await client.query(`
       INSERT INTO job_posts (client_id, title, description, budget_min, budget_max, required_skill, duration_days, status, deadline)
-      VALUES ($1, 'Personalized Math Tutor Chatbot', 'Build a chatbot helper for student math problems. Must integrate with LaTeX rendering and handle algebra, calculus questions using step-by-step reasoning.', 1500.00, 2500.00, 'AI Integration, Gen AI', 15, 'open', NOW() + INTERVAL '15 days')
+      VALUES ($1, 'Personalized Math Tutor Chatbot', 'Build a chatbot helper for student math problems. Must integrate with LaTeX rendering and handle algebra, calculus questions using step-by-step reasoning.', 1500.00, 2500.00, 'AI Integration, Gen AI', 15, 'closed', NOW() + INTERVAL '15 days')
       RETURNING id;
     `, [clientIds['client3@example.com']]);
     const job3Id = jobRes3.rows[0].id;
@@ -235,20 +235,20 @@ async function seedDatabase() {
     
     // Milestones for Project 1 (Active, $5000 total)
     const mileRes1 = await client.query(`
-      INSERT INTO milestones (project_id, title, amount, status, due_date, deliverable)
+      INSERT INTO milestones (project_id, title, content, amount, status, due_date, deliverable)
       VALUES 
-        ($1, 'Data Preprocessing & UNet Architecture Setup', 2000.00, 'released', NOW() - INTERVAL '1 days', 'GitHub repository setup and data loaders ready.'),
-        ($1, 'Model Training & Validation Results', 3000.00, 'funded', NOW() + INTERVAL '10 days', 'Trained model weights with validation metrics > 95% dice score.')
+        ($1, 'Data Preprocessing & UNet Architecture Setup', 'GitHub repository setup and data loaders ready.', 2000.00, 'released', NOW() - INTERVAL '1 days', true),
+        ($1, 'Model Training & Validation Results', 'Trained model weights with validation metrics > 95% dice score.', 3000.00, 'funded', NOW() + INTERVAL '10 days', true)
       RETURNING id;
     `, [project1Id]);
     const milestone1Id = mileRes1.rows[0].id;
 
     // Milestones for Project 2 (Completed, $2000 total)
     await client.query(`
-      INSERT INTO milestones (project_id, title, amount, status, due_date, deliverable)
+      INSERT INTO milestones (project_id, title, content, amount, status, due_date, deliverable)
       VALUES 
-        ($1, 'Chatbot MVP Back-end', 1000.00, 'released', NOW() - INTERVAL '10 days', 'Express API endpoint connected to OpenAI.'),
-        ($1, 'LaTeX Integration & UI Delivery', 1000.00, 'released', NOW() - INTERVAL '3 days', 'Front-end chatbot component with LaTeX support.');
+        ($1, 'Chatbot MVP Back-end', 'Express API endpoint connected to OpenAI.', 1000.00, 'released', NOW() - INTERVAL '10 days', true),
+        ($1, 'LaTeX Integration & UI Delivery', 'Front-end chatbot component with LaTeX support.', 1000.00, 'released', NOW() - INTERVAL '3 days', true);
     `, [project2Id]);
 
     console.log(`Milestones seeded. (Project 1 Milestone 1 ID: ${milestone1Id})`);
