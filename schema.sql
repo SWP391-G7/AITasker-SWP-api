@@ -1,3 +1,8 @@
+-- Reset the public schema so this file can be rerun from scratch.
+-- This drops all existing tables, enum types, indexes, constraints, and data in public.
+DROP SCHEMA IF EXISTS public CASCADE;
+CREATE SCHEMA public;
+
 -- Enable UUID extension if not already active
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
@@ -29,6 +34,7 @@ CREATE TABLE users (
     email VARCHAR(255) UNIQUE NOT NULL,
     role user_role NOT NULL,
     is_verified BOOLEAN DEFAULT false,
+    acc_status BOOLEAN DEFAULT true,
     created_at DATE DEFAULT CURRENT_DATE
 );
 

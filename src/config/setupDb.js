@@ -51,6 +51,11 @@ async function initDatabase() {
     await client.query(alterQuery);
     console.log('Password column checked/added successfully.');
 
+    // Add acc_status column for admin account activation/deactivation if it does not already exist
+    console.log('Ensuring users table has "acc_status" column for admin account status...');
+    await client.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS acc_status BOOLEAN DEFAULT true;');
+    console.log('Account status column checked/added successfully.');
+
     // Ensure client_profiles and expert_profiles have the new onboarding columns
     console.log('Ensuring client_profiles and expert_profiles have onboarding columns...');
     await client.query('ALTER TABLE client_profiles ADD COLUMN IF NOT EXISTS company_name VARCHAR(255);');
@@ -59,6 +64,11 @@ async function initDatabase() {
     await client.query('ALTER TABLE expert_profiles ADD COLUMN IF NOT EXISTS professional_title VARCHAR(255);');
     await client.query('ALTER TABLE expert_profiles ADD COLUMN IF NOT EXISTS experience VARCHAR(100);');
     await client.query('ALTER TABLE expert_profiles ADD COLUMN IF NOT EXISTS portfolio_url VARCHAR(255);');
+    await client.query('ALTER TABLE expert_profiles ADD COLUMN IF NOT EXISTS skills TEXT;');
+    await client.query('ALTER TABLE expert_profiles ADD COLUMN IF NOT EXISTS hourly_rate VARCHAR(50);');
+    await client.query('ALTER TABLE expert_profiles ADD COLUMN IF NOT EXISTS bio TEXT;');
+    await client.query('ALTER TABLE expert_profiles ADD COLUMN IF NOT EXISTS ai_specializations TEXT;');
+    await client.query('ALTER TABLE expert_profiles ADD COLUMN IF NOT EXISTS avg_rating REAL DEFAULT 0.0;');
     console.log('Onboarding columns checked/added successfully.');
     
   } catch (err) {

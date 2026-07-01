@@ -1,4 +1,5 @@
-const { Pool } = require('pg');
+//From the 'pg' package, we import the Pool class to manage PostgreSQL connections.
+const { Pool } = require('pg'); 
 require('dotenv').config();
 
 const isProduction = process.env.NODE_ENV === 'production';

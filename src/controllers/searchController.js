@@ -59,7 +59,7 @@ const searchEntities = async (req, res, next) => {
         WHERE 1=1
       `;
       if (!includeClosed) {
-        queryText += " AND j.status != 'closed'";
+        queryText += " AND j.status::text != 'closed'";
       }
 
       if (query && query.trim() !== '') {

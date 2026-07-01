@@ -46,8 +46,8 @@ async function seedDatabase() {
     
     // Admins
     const adminRes = await client.query(`
-      INSERT INTO users (password, full_name, email, role, is_verified)
-      VALUES ($1, 'Global Admin', 'admin@example.com', 'admin', true)
+      INSERT INTO users (password, full_name, email, role, is_verified, acc_status)
+      VALUES ($1, 'Global Admin', 'admin@example.com', 'admin', true, true)
       RETURNING id;
     `, [hashedPassword]);
     const adminId = adminRes.rows[0].id;
@@ -63,8 +63,8 @@ async function seedDatabase() {
     const expertIds = {};
     for (const exp of expertsData) {
       const res = await client.query(`
-        INSERT INTO users (password, full_name, email, role, is_verified)
-        VALUES ($1, $2, $3, 'expert', true)
+        INSERT INTO users (password, full_name, email, role, is_verified, acc_status)
+        VALUES ($1, $2, $3, 'expert', true, true)
         RETURNING id;
       `, [hashedPassword, exp.name, exp.email]);
       expertIds[exp.email] = res.rows[0].id;
@@ -80,8 +80,8 @@ async function seedDatabase() {
     const clientIds = {};
     for (const cli of clientsData) {
       const res = await client.query(`
-        INSERT INTO users (password, full_name, email, role, is_verified)
-        VALUES ($1, $2, $3, 'client', true)
+        INSERT INTO users (password, full_name, email, role, is_verified, acc_status)
+        VALUES ($1, $2, $3, 'client', true, true)
         RETURNING id;
       `, [hashedPassword, cli.name, cli.email]);
       clientIds[cli.email] = res.rows[0].id;
@@ -235,20 +235,20 @@ async function seedDatabase() {
     
     // Milestones for Project 1 (Active, $5000 total)
     const mileRes1 = await client.query(`
-      INSERT INTO milestones (project_id, title, amount, status, due_date, deliverable)
+      INSERT INTO milestones (project_id, title, content, amount, status, due_date, deliverable)
       VALUES 
-        ($1, 'Data Preprocessing & UNet Architecture Setup', 2000.00, 'released', NOW() - INTERVAL '1 days', 'GitHub repository setup and data loaders ready.'),
-        ($1, 'Model Training & Validation Results', 3000.00, 'funded', NOW() + INTERVAL '10 days', 'Trained model weights with validation metrics > 95% dice score.')
+        ($1, 'Data Preprocessing & UNet Architecture Setup', 'GitHub repository setup and data loaders ready.', 2000.00, 'released', NOW() - INTERVAL '1 days', true),
+        ($1, 'Model Training & Validation Results', 'Trained model weights with validation metrics > 95% dice score.', 3000.00, 'funded', NOW() + INTERVAL '10 days', true)
       RETURNING id;
     `, [project1Id]);
     const milestone1Id = mileRes1.rows[0].id;
 
     // Milestones for Project 2 (Completed, $2000 total)
     await client.query(`
-      INSERT INTO milestones (project_id, title, amount, status, due_date, deliverable)
+      INSERT INTO milestones (project_id, title, content, amount, status, due_date, deliverable)
       VALUES 
-        ($1, 'Chatbot MVP Back-end', 1000.00, 'released', NOW() - INTERVAL '10 days', 'Express API endpoint connected to OpenAI.'),
-        ($1, 'LaTeX Integration & UI Delivery', 1000.00, 'released', NOW() - INTERVAL '3 days', 'Front-end chatbot component with LaTeX support.');
+        ($1, 'Chatbot MVP Back-end', 'Express API endpoint connected to OpenAI.', 1000.00, 'released', NOW() - INTERVAL '10 days', true),
+        ($1, 'LaTeX Integration & UI Delivery', 'Front-end chatbot component with LaTeX support.', 1000.00, 'released', NOW() - INTERVAL '3 days', true);
     `, [project2Id]);
 
     console.log(`Milestones seeded. (Project 1 Milestone 1 ID: ${milestone1Id})`);
