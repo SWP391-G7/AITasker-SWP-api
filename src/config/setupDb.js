@@ -113,6 +113,11 @@ async function initDatabase() {
     await client.query('ALTER TABLE projects ADD COLUMN IF NOT EXISTS description TEXT;');
     console.log('Projects table columns checked/added successfully.');
 
+    // Remove deprecated deadline column from job_posts (replaced by duration_days)
+    console.log('Removing deprecated deadline column from job_posts if present...');
+    await client.query('ALTER TABLE job_posts DROP COLUMN IF EXISTS deadline;');
+    console.log('Deadline column check/removal done.');
+
   } catch (err) {
     console.error('Error during database initialization:', err);
     throw err;

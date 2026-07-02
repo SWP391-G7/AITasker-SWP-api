@@ -196,7 +196,7 @@ const getProposalById = async (req, res, next) => {
         j.status       AS job_status,
         j.budget_min,
         j.budget_max,
-        j.deadline,
+        j.duration_days,
         j.client_id,
         u_expert.full_name AS expert_name,
         u_client.full_name AS client_name,
@@ -627,7 +627,7 @@ const getMyProposals = async (req, res, next) => {
         j.status       AS job_status,
         j.budget_min,
         j.budget_max,
-        j.deadline,
+        j.duration_days,
         u.full_name    AS client_name
       FROM proposals p
       JOIN job_posts  j ON p.job_id    = j.id
