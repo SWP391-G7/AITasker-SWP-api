@@ -178,6 +178,67 @@ const getProposalsByJob = async (req, res, next) => {
 }
 
 /**
+ * @desc    Get a single proposal by ID
+ * @route   GET /api/proposals/:id
+ * @access  Private (expert who owns it OR client who owns the job)
+ */
+const getProposalById = async (req, res, next) => {
+  const { id } = req.params;
+  const userId = req.user.id;
+  const userRole = req.user.role;
+
+  try {
+    const query = `
+      SELECT
+        p.*,
+        j.title        AS job_title,
+        j.description  AS job_description,
+        j.status       AS job_status,
+        j.budget_min,
+        j.budget_max,
+        j.deadline,
+        j.client_id,
+        u_expert.full_name AS expert_name,
+        u_client.full_name AS client_name,
+        ep.professional_title
+      FROM proposals p
+      JOIN job_posts     j        ON p.job_id    = j.id
+      JOIN users         u_expert ON p.expert_id = u_expert.id
+      JOIN users         u_client ON j.client_id = u_client.id
+      LEFT JOIN expert_profiles ep ON p.expert_id = ep.id
+      WHERE p.id = $1;
+    `;
+    const result = await pool.query(query, [id]);
+
+    if (result.rows.length === 0) {
+      const err = new Error('Proposal not found');
+      err.statusCode = 404;
+      return next(err);
+    }
+
+    const proposal = result.rows[0];
+
+    // Access control: only the expert who submitted it, the client who owns the job, or admin
+    if (
+      userRole !== 'admin' &&
+      proposal.expert_id !== userId &&
+      proposal.client_id !== userId
+    ) {
+      const err = new Error('Forbidden: You do not have access to this proposal');
+      err.statusCode = 403;
+      return next(err);
+    }
+
+    return res.status(200).json({
+      success: true,
+      proposal
+    });
+  } catch (error) {
+    return next(error);
+  }
+};
+
+/**
  * @desc    Update a proposal
  * @route   PUT /api/proposals/:id
  * @access  Private (Owner expert only)
@@ -542,9 +603,55 @@ const counterProposal = async (req, res, next) => {
   }
 };
 
+/**
+ * @desc    Get all proposals submitted by the authenticated expert
+ * @route   GET /api/proposals/my
+ * @access  Private (Expert only)
+ */
+const getMyProposals = async (req, res, next) => {
+  const userId = req.user.id;
+  const userRole = req.user.role;
+
+  if (userRole !== 'expert' && userRole !== 'admin') {
+    const err = new Error('Forbidden: Only experts can access their proposals.');
+    err.statusCode = 403;
+    return next(err);
+  }
+
+  try {
+    const query = `
+      SELECT
+        p.*,
+        j.title        AS job_title,
+        j.description  AS job_description,
+        j.status       AS job_status,
+        j.budget_min,
+        j.budget_max,
+        j.deadline,
+        u.full_name    AS client_name
+      FROM proposals p
+      JOIN job_posts  j ON p.job_id    = j.id
+      JOIN users      u ON j.client_id = u.id
+      WHERE p.expert_id = $1
+      ORDER BY p.id DESC;
+    `;
+
+    const result = await pool.query(query, [userId]);
+
+    return res.status(200).json({
+      success: true,
+      proposals: result.rows
+    });
+  } catch (error) {
+    return next(error);
+  }
+};
+
 module.exports = {
   createProposal,
+  getMyProposals,
   getProposalsByJob,
+  getProposalById,
   updateProposal,
   deleteProposal,
   updateProposalStatus,
