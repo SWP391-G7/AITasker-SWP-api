@@ -151,6 +151,7 @@ CREATE TABLE milestones (
     amount NUMERIC(10, 2) NOT NULL,
     status milestone_status DEFAULT 'pending',
     due_date TIMESTAMP,
+    response TEXT DEFAULT NULL,
     deliverable BOOLEAN DEFAULT false
 );
 
