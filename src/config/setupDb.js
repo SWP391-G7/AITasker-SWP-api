@@ -87,6 +87,26 @@ async function initDatabase() {
       }
     }
 
+    // Add counter-proposal columns to proposals table
+    console.log('Ensuring proposals table has counter-proposal columns...');
+    await client.query('ALTER TABLE proposals ADD COLUMN IF NOT EXISTS counter_bid_amount NUMERIC(10, 2);');
+    await client.query('ALTER TABLE proposals ADD COLUMN IF NOT EXISTS counter_cover_letter TEXT;');
+    await client.query('ALTER TABLE proposals ADD COLUMN IF NOT EXISTS counter_initiated_by UUID;');
+    console.log('Counter-proposal columns checked/added successfully.');
+
+    // Add countered status to proposal_status enum
+    console.log('Ensuring proposal_status enum has "countered" status...');
+    try {
+      await client.query("ALTER TYPE proposal_status ADD VALUE 'countered';");
+      console.log('Added countered status to proposal_status enum.');
+    } catch (err) {
+      if (err.code !== '42710') {
+        console.warn('Non-fatal warning adding countered status to proposal_status enum:', err.message);
+      } else {
+        console.log('Countered status already exists in proposal_status enum.');
+      }
+    }
+
     // Add title and description to projects table
     console.log('Ensuring projects table has title and description columns...');
     await client.query('ALTER TABLE projects ADD COLUMN IF NOT EXISTS title VARCHAR(255);');

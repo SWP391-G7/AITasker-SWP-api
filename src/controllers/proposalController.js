@@ -323,9 +323,9 @@ const deleteProposal = async (req, res, next) => {
 }
 
 /**
- * @desc    Update a proposal's status (Accept / Reject)
+ * @desc    Update a proposal's status (Accept / Reject) — works for both client and expert
  * @route   PUT /api/proposals/:id/status
- * @access  Private (Owner client of the job post only)
+ * @access  Private
  */
 const updateProposalStatus = async (req, res, next) => {
   const { id } = req.params;
@@ -368,8 +368,17 @@ const updateProposalStatus = async (req, res, next) => {
 
     const proposal = proposalRes.rows[0];
 
-    // Verify ownership: client of the job post, or admin
-    if (proposal.client_id !== userId && userRole !== 'admin') {
+    const isClient = userRole === 'client' && proposal.client_id === userId;
+    const isExpert = userRole === 'expert' && proposal.expert_id === userId;
+
+    // Expert can only approve/reject when the counter was initiated by the client (it's their turn)
+    if (isExpert) {
+      if (proposal.status !== 'countered' || proposal.counter_initiated_by === userId) {
+        const err = new Error('Forbidden: You can only respond to a counter-proposal made by the client');
+        err.statusCode = 403;
+        return next(err);
+      }
+    } else if (!isClient && userRole !== 'admin') {
       const err = new Error('Forbidden: You can only update proposals for your own job posts');
       err.statusCode = 403;
       return next(err);
@@ -378,22 +387,28 @@ const updateProposalStatus = async (req, res, next) => {
     // 2. Start transaction
     await pool.query('BEGIN');
 
-    // 3. Update the proposal status
+    // 3. If approving a counter, adopt the counter_bid_amount as the final bid
+    let finalBidAmount = proposal.bid_amount;
+    if (status === 'accepted' && proposal.status === 'countered' && proposal.counter_bid_amount) {
+      finalBidAmount = proposal.counter_bid_amount;
+    }
+
+    // 4. Update the proposal status
     const updateProposalQuery = `
       UPDATE proposals
-      SET status = $1
-      WHERE id = $2
+      SET status = $1, bid_amount = $2
+      WHERE id = $3
       RETURNING *;
     `;
-    const updatedProposalRes = await pool.query(updateProposalQuery, [status, id]);
+    const updatedProposalRes = await pool.query(updateProposalQuery, [status, finalBidAmount, id]);
     const updatedProposal = updatedProposalRes.rows[0];
 
     let createdProject = null;
 
-    // 4. If status is accepted, handle job status and project creation
+    // 5. If status is accepted, handle job status and project creation
     if (status === 'accepted') {
-      if (start_project === false) {
-        // Set job status to 'pending'
+      if (start_project === false || isExpert) {
+        // Expert approving → job goes to pending; client must click Create Project
         const updateJobQuery = `
           UPDATE job_posts
           SET status = 'pending'
@@ -401,7 +416,7 @@ const updateProposalStatus = async (req, res, next) => {
         `;
         await pool.query(updateJobQuery, [proposal.job_id]);
       } else {
-        // Set job status to 'closed'
+        // Client accepting with immediate start → close job and auto-create project
         const updateJobQuery = `
           UPDATE job_posts
           SET status = 'closed'
@@ -418,7 +433,7 @@ const updateProposalStatus = async (req, res, next) => {
         const projectRes = await pool.query(insertProjectQuery, [
           proposal.expert_id,
           proposal.client_id,
-          proposal.bid_amount,
+          finalBidAmount,
           proposal.job_title,
           proposal.job_description
         ]);
@@ -441,10 +456,97 @@ const updateProposalStatus = async (req, res, next) => {
   }
 };
 
+/**
+ * @desc    Counter a proposal with a new bid amount (client -> expert or expert -> client)
+ * @route   PUT /api/proposals/:id/counter
+ * @access  Private (Client who owns the job OR Expert who owns the proposal)
+ */
+const counterProposal = async (req, res, next) => {
+  const { id } = req.params;
+  const userId = req.user.id;
+  const userRole = req.user.role;
+  const { bid_amount, cover_letter } = req.body;
+
+  // Validate bid_amount
+  const parsedBidAmount = parseFloat(bid_amount);
+  if (!bid_amount || isNaN(parsedBidAmount) || parsedBidAmount <= 0) {
+    const err = new Error('A valid bid amount is required for a counter-proposal');
+    err.statusCode = 400;
+    return next(err);
+  }
+
+  try {
+    // Fetch proposal + job ownership info
+    const proposalQuery = `
+      SELECT p.*, j.client_id, j.status as job_status
+      FROM proposals p
+      JOIN job_posts j ON p.job_id = j.id
+      WHERE p.id = $1
+    `;
+    const proposalRes = await pool.query(proposalQuery, [id]);
+    if (proposalRes.rows.length === 0) {
+      const err = new Error('Proposal not found');
+      err.statusCode = 404;
+      return next(err);
+    }
+    const proposal = proposalRes.rows[0];
+
+    // Only the client who owns the job OR the expert who submitted the proposal can counter
+    const isClient = userRole === 'client' && proposal.client_id === userId;
+    const isExpert = userRole === 'expert' && proposal.expert_id === userId;
+    if (!isClient && !isExpert && userRole !== 'admin') {
+      const err = new Error('Forbidden: You are not a party to this proposal');
+      err.statusCode = 403;
+      return next(err);
+    }
+
+    // Cannot counter an already accepted or rejected proposal
+    if (proposal.status === 'accepted' || proposal.status === 'rejected') {
+      const err = new Error(`Cannot counter a proposal that is already ${proposal.status}`);
+      err.statusCode = 400;
+      return next(err);
+    }
+
+    // Prevent countering your own counter (must wait for the other party)
+    if (proposal.status === 'countered' && proposal.counter_initiated_by === userId) {
+      const err = new Error('You already sent a counter-proposal. Wait for the other party to respond.');
+      err.statusCode = 400;
+      return next(err);
+    }
+
+    // Update proposal with counter fields
+    const updateQuery = `
+      UPDATE proposals
+      SET
+        status = 'countered',
+        counter_bid_amount = $1,
+        counter_cover_letter = $2,
+        counter_initiated_by = $3
+      WHERE id = $4
+      RETURNING *;
+    `;
+    const result = await pool.query(updateQuery, [
+      parsedBidAmount,
+      cover_letter ? cover_letter.trim() : null,
+      userId,
+      id
+    ]);
+
+    return res.status(200).json({
+      success: true,
+      message: 'Counter-proposal submitted successfully',
+      proposal: result.rows[0]
+    });
+  } catch (error) {
+    return next(error);
+  }
+};
+
 module.exports = {
   createProposal,
   getProposalsByJob,
   updateProposal,
   deleteProposal,
-  updateProposalStatus
+  updateProposalStatus,
+  counterProposal
 }
