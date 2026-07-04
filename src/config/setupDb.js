@@ -51,6 +51,13 @@ async function initDatabase() {
     await client.query(alterQuery);
     console.log('Password column checked/added successfully.');
 
+    // Ensure conversations table matches the participant-based schema (sender_id, target_id)
+    console.log('Ensuring conversations table matches the participant-based schema...');
+    await client.query('ALTER TABLE conversations DROP COLUMN IF EXISTS project_id;');
+    await client.query('ALTER TABLE conversations ADD COLUMN IF NOT EXISTS sender_id UUID REFERENCES users(id) ON DELETE CASCADE;');
+    await client.query('ALTER TABLE conversations ADD COLUMN IF NOT EXISTS target_id UUID REFERENCES users(id) ON DELETE CASCADE;');
+    console.log('Conversations table checked/migrated successfully.');
+
     // Ensure client_profiles and expert_profiles have the new onboarding columns
     console.log('Ensuring client_profiles and expert_profiles have onboarding columns...');
     await client.query('ALTER TABLE client_profiles ADD COLUMN IF NOT EXISTS company_name VARCHAR(255);');

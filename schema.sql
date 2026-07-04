@@ -126,7 +126,8 @@ CREATE TABLE projects (
 -- 10. CONVERSATION TABLE
 CREATE TABLE conversations (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    project_id UUID REFERENCES projects(id) ON DELETE SET NULL,
+    sender_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    target_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     content TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
