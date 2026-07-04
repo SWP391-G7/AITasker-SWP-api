@@ -56,10 +56,28 @@ const createMessage = async (req, res, next) => {
 
     const newMessage = messageRes.rows[0];
 
+    // Fetch sender's name for WS payload
+    const senderRes = await pool.query('SELECT full_name FROM users WHERE id = $1', [userId]);
+    const senderName = senderRes.rows[0]?.full_name || 'User';
+
+    const msgPayload = {
+      ...newMessage,
+      sender_name: senderName
+    };
+
+    // 3. Broadcast message to other participant if online
+    const otherUserId = sender_id === userId ? target_id : sender_id;
+    const { broadcast } = require('../config/wsClients');
+    broadcast(otherUserId, {
+      type: 'new_message',
+      conversationId,
+      message: msgPayload
+    });
+
     return res.status(201).json({
       success: true,
       message: 'Message sent successfully',
-      data: newMessage
+      data: msgPayload
     });
   } catch (err) {
     return next(err);
