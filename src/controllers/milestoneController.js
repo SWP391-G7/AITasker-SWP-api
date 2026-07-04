@@ -1,37 +1,58 @@
 const { pool } = require('../config/db');
 
+/* ─────────────────────────────────────────────────────────────────────────────
+   PLAN PHASE
+   Expert batch-submits a set of milestones for client review.
+───────────────────────────────────────────────────────────────────────────── */
+
 /**
- * @desc    Create a new milestone for a project
- * @route   POST /api/milestones/project/:projectId
+ * @desc    Bulk-create and submit a milestone plan for a project
+ * @route   POST /api/milestones/project/:projectId/submit-plan
  * @access  Private (Expert only)
+ * @body    { milestones: [{ title, content, amount, delivery_days }] }
  */
-const createMilestone = async (req, res, next) => {
+const submitMilestonePlan = async (req, res, next) => {
   const { projectId } = req.params;
-  const userId = req.user.id;
+  const userId   = req.user.id;
   const userRole = req.user.role;
-  const { title, content, amount, due_date } = req.body;
+  const { milestones } = req.body;
 
   if (userRole !== 'expert' && userRole !== 'admin') {
-    const err = new Error('Forbidden: Only experts can create milestones');
+    const err = new Error('Forbidden: Only experts can submit milestone plans');
     err.statusCode = 403;
     return next(err);
   }
 
-  if (!title || typeof title !== 'string' || title.trim() === '') {
-    const err = new Error('Milestone title is required');
+  if (!Array.isArray(milestones) || milestones.length === 0) {
+    const err = new Error('At least one milestone is required');
     err.statusCode = 400;
     return next(err);
   }
 
-  const parsedAmount = parseFloat(amount);
-  if (isNaN(parsedAmount) || parsedAmount <= 0) {
-    const err = new Error('Amount must be a positive number');
-    err.statusCode = 400;
-    return next(err);
+  // Validate each milestone
+  for (let i = 0; i < milestones.length; i++) {
+    const m = milestones[i];
+    if (!m.title || String(m.title).trim() === '') {
+      const err = new Error(`Milestone ${i + 1}: title is required`);
+      err.statusCode = 400;
+      return next(err);
+    }
+    const amt = parseFloat(m.amount);
+    if (isNaN(amt) || amt <= 0) {
+      const err = new Error(`Milestone ${i + 1}: amount must be a positive number`);
+      err.statusCode = 400;
+      return next(err);
+    }
+    const days = parseInt(m.delivery_days, 10);
+    if (isNaN(days) || days <= 0) {
+      const err = new Error(`Milestone ${i + 1}: delivery_days must be a positive integer`);
+      err.statusCode = 400;
+      return next(err);
+    }
   }
 
   try {
-    // 1. Verify project exists and belongs to the expert
+    // Verify project exists and belongs to the expert
     const projectCheck = await pool.query(
       'SELECT id, expert_id FROM projects WHERE id = $1',
       [projectId]
@@ -45,31 +66,49 @@ const createMilestone = async (req, res, next) => {
 
     const project = projectCheck.rows[0];
     if (project.expert_id !== userId && userRole !== 'admin') {
-      const err = new Error('Forbidden: You can only create milestones for your own projects');
+      const err = new Error('Forbidden: You can only submit plans for your own projects');
       err.statusCode = 403;
       return next(err);
     }
 
-    // 2. Insert Milestone
-    const insertQuery = `
-      INSERT INTO milestones (project_id, title, content, amount, status, due_date)
-      VALUES ($1, $2, $3, $4, 'pending', $5)
-      RETURNING *;
-    `;
-    const result = await pool.query(insertQuery, [
-      projectId,
-      title.trim(),
-      content ? content.trim() : null,
-      parsedAmount,
-      due_date || null
-    ]);
+    await pool.query('BEGIN');
+
+    // Delete any existing planning / change_requested milestones (clean slate on re-submit)
+    await pool.query(
+      "DELETE FROM milestones WHERE project_id = $1 AND status IN ('planning', 'change_requested')",
+      [projectId]
+    );
+
+    // Insert new milestones in order
+    const created = [];
+    for (let i = 0; i < milestones.length; i++) {
+      const m   = milestones[i];
+      const row = await pool.query(
+        `INSERT INTO milestones
+           (project_id, title, content, amount, delivery_days, status, position)
+         VALUES ($1, $2, $3, $4, $5, 'planning', $6)
+         RETURNING *;`,
+        [
+          projectId,
+          String(m.title).trim(),
+          m.content ? String(m.content).trim() : null,
+          parseFloat(m.amount),
+          parseInt(m.delivery_days, 10),
+          i + 1,
+        ]
+      );
+      created.push(row.rows[0]);
+    }
+
+    await pool.query('COMMIT');
 
     return res.status(201).json({
       success: true,
-      message: 'Milestone created successfully',
-      milestone: result.rows[0]
+      message: 'Milestone plan submitted for client review',
+      milestones: created,
     });
   } catch (error) {
+    await pool.query('ROLLBACK');
     return next(error);
   }
 };
@@ -81,11 +120,10 @@ const createMilestone = async (req, res, next) => {
  */
 const getMilestonesByProject = async (req, res, next) => {
   const { projectId } = req.params;
-  const userId = req.user.id;
+  const userId   = req.user.id;
   const userRole = req.user.role;
 
   try {
-    // 1. Verify project access
     const projectCheck = await pool.query(
       'SELECT client_id, expert_id FROM projects WHERE id = $1',
       [projectId]
@@ -104,17 +142,65 @@ const getMilestonesByProject = async (req, res, next) => {
       return next(err);
     }
 
-    // 2. Fetch milestones
-    const query = `
-      SELECT * FROM milestones
-      WHERE project_id = $1
-      ORDER BY due_date ASC, id ASC;
-    `;
-    const result = await pool.query(query, [projectId]);
+    const result = await pool.query(
+      'SELECT * FROM milestones WHERE project_id = $1 ORDER BY position ASC, id ASC;',
+      [projectId]
+    );
+
+    return res.status(200).json({ success: true, milestones: result.rows });
+  } catch (error) {
+    return next(error);
+  }
+};
+
+/**
+ * @desc    Approve the submitted milestone plan (all planning → planned)
+ * @route   PUT /api/milestones/project/:projectId/approve-plan
+ * @access  Private (Client only)
+ */
+const approveMilestonePlan = async (req, res, next) => {
+  const { projectId } = req.params;
+  const userId   = req.user.id;
+  const userRole = req.user.role;
+
+  try {
+    const projectCheck = await pool.query(
+      'SELECT id, client_id FROM projects WHERE id = $1',
+      [projectId]
+    );
+
+    if (projectCheck.rows.length === 0) {
+      const err = new Error('Project not found');
+      err.statusCode = 404;
+      return next(err);
+    }
+
+    if (projectCheck.rows[0].client_id !== userId && userRole !== 'admin') {
+      const err = new Error('Forbidden: Only the project client can approve the plan');
+      err.statusCode = 403;
+      return next(err);
+    }
+
+    const planningCount = await pool.query(
+      "SELECT COUNT(*) FROM milestones WHERE project_id = $1 AND status = 'planning'",
+      [projectId]
+    );
+
+    if (parseInt(planningCount.rows[0].count, 10) === 0) {
+      const err = new Error('No planning milestones found to approve');
+      err.statusCode = 400;
+      return next(err);
+    }
+
+    const result = await pool.query(
+      "UPDATE milestones SET status = 'planned' WHERE project_id = $1 AND status = 'planning' RETURNING *;",
+      [projectId]
+    );
 
     return res.status(200).json({
       success: true,
-      milestones: result.rows
+      message: 'Milestone plan approved',
+      milestones: result.rows,
     });
   } catch (error) {
     return next(error);
@@ -122,25 +208,92 @@ const getMilestonesByProject = async (req, res, next) => {
 };
 
 /**
- * @desc    Update a milestone
+ * @desc    Request changes to the plan (per-milestone notes; all planning → change_requested)
+ * @route   PUT /api/milestones/project/:projectId/request-changes
+ * @access  Private (Client only)
+ * @body    { notes: { [milestoneId]: "note text" } }
+ */
+const requestPlanChanges = async (req, res, next) => {
+  const { projectId } = req.params;
+  const userId   = req.user.id;
+  const userRole = req.user.role;
+  const { notes } = req.body; // { milestoneId: noteText }
+
+  try {
+    const projectCheck = await pool.query(
+      'SELECT id, client_id FROM projects WHERE id = $1',
+      [projectId]
+    );
+
+    if (projectCheck.rows.length === 0) {
+      const err = new Error('Project not found');
+      err.statusCode = 404;
+      return next(err);
+    }
+
+    if (projectCheck.rows[0].client_id !== userId && userRole !== 'admin') {
+      const err = new Error('Forbidden: Only the project client can request plan changes');
+      err.statusCode = 403;
+      return next(err);
+    }
+
+    const planningRes = await pool.query(
+      "SELECT id FROM milestones WHERE project_id = $1 AND status = 'planning'",
+      [projectId]
+    );
+
+    if (planningRes.rows.length === 0) {
+      const err = new Error('No planning milestones found');
+      err.statusCode = 400;
+      return next(err);
+    }
+
+    await pool.query('BEGIN');
+
+    const updated = [];
+    for (const row of planningRes.rows) {
+      const note = (notes && notes[row.id]) ? String(notes[row.id]).trim() : null;
+      const r = await pool.query(
+        "UPDATE milestones SET status = 'change_requested', change_request_note = $1 WHERE id = $2 RETURNING *;",
+        [note, row.id]
+      );
+      updated.push(r.rows[0]);
+    }
+
+    await pool.query('COMMIT');
+
+    return res.status(200).json({
+      success: true,
+      message: 'Change request submitted to expert',
+      milestones: updated,
+    });
+  } catch (error) {
+    await pool.query('ROLLBACK');
+    return next(error);
+  }
+};
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   WORK PHASE
+   Expert starts / submits deliverables; client reviews and pays.
+───────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * @desc    Update a milestone (only when planning or change_requested)
  * @route   PUT /api/milestones/:id
  * @access  Private (Expert only)
  */
 const updateMilestone = async (req, res, next) => {
-  const { id } = req.params;
-  const userId = req.user.id;
+  const { id }   = req.params;
+  const userId   = req.user.id;
   const userRole = req.user.role;
-  const { title, content, amount, due_date } = req.body;
+  const { title, content, amount, delivery_days } = req.body;
 
   try {
-    // 1. Fetch milestone & project details to verify ownership
-    const milestoneQuery = `
-      SELECT m.*, p.expert_id 
-      FROM milestones m
-      JOIN projects p ON m.project_id = p.id
-      WHERE m.id = $1;
-    `;
-    const milestoneRes = await pool.query(milestoneQuery, [id]);
+    const milestoneRes = await pool.query(
+      'SELECT m.*, p.expert_id FROM milestones m JOIN projects p ON m.project_id = p.id WHERE m.id = $1;',
+      [id]
+    );
 
     if (milestoneRes.rows.length === 0) {
       const err = new Error('Milestone not found');
@@ -151,51 +304,53 @@ const updateMilestone = async (req, res, next) => {
     const milestone = milestoneRes.rows[0];
 
     if (milestone.expert_id !== userId && userRole !== 'admin') {
-      const err = new Error('Forbidden: You can only update milestones for your own projects');
+      const err = new Error('Forbidden: You can only update your own milestones');
       err.statusCode = 403;
       return next(err);
     }
 
-    if (milestone.status !== 'pending') {
-      const err = new Error('Forbidden: Only pending milestones can be updated');
+    if (!['planning', 'change_requested'].includes(milestone.status)) {
+      const err = new Error('Only planning or change-requested milestones can be updated');
       err.statusCode = 400;
       return next(err);
     }
 
-    // Validation
     const updates = [];
-    const values = [];
-    let paramIdx = 1;
+    const values  = [];
+    let   idx     = 1;
 
     if (title !== undefined) {
-      if (!title || title.trim() === '') {
-        const err = new Error('Milestone title cannot be empty');
+      if (!title || String(title).trim() === '') {
+        const err = new Error('Title cannot be empty');
         err.statusCode = 400;
         return next(err);
       }
-      updates.push(`title = $${paramIdx++}`);
-      values.push(title.trim());
+      updates.push(`title = $${idx++}`);
+      values.push(String(title).trim());
     }
-
     if (content !== undefined) {
-      updates.push(`content = $${paramIdx++}`);
-      values.push(content ? content.trim() : null);
+      updates.push(`content = $${idx++}`);
+      values.push(content ? String(content).trim() : null);
     }
-
     if (amount !== undefined) {
-      const parsedAmount = parseFloat(amount);
-      if (isNaN(parsedAmount) || parsedAmount <= 0) {
+      const parsed = parseFloat(amount);
+      if (isNaN(parsed) || parsed <= 0) {
         const err = new Error('Amount must be a positive number');
         err.statusCode = 400;
         return next(err);
       }
-      updates.push(`amount = $${paramIdx++}`);
-      values.push(parsedAmount);
+      updates.push(`amount = $${idx++}`);
+      values.push(parsed);
     }
-
-    if (due_date !== undefined) {
-      updates.push(`due_date = $${paramIdx++}`);
-      values.push(due_date || null);
+    if (delivery_days !== undefined) {
+      const parsed = parseInt(delivery_days, 10);
+      if (isNaN(parsed) || parsed <= 0) {
+        const err = new Error('Delivery days must be a positive integer');
+        err.statusCode = 400;
+        return next(err);
+      }
+      updates.push(`delivery_days = $${idx++}`);
+      values.push(parsed);
     }
 
     if (updates.length === 0) {
@@ -205,42 +360,32 @@ const updateMilestone = async (req, res, next) => {
     }
 
     values.push(id);
-    const updateQuery = `
-      UPDATE milestones
-      SET ${updates.join(', ')}
-      WHERE id = $${paramIdx}
-      RETURNING *;
-    `;
+    const result = await pool.query(
+      `UPDATE milestones SET ${updates.join(', ')} WHERE id = $${idx} RETURNING *;`,
+      values
+    );
 
-    const result = await pool.query(updateQuery, values);
-    return res.status(200).json({
-      success: true,
-      message: 'Milestone updated successfully',
-      milestone: result.rows[0]
-    });
+    return res.status(200).json({ success: true, milestone: result.rows[0] });
   } catch (error) {
     return next(error);
   }
 };
 
 /**
- * @desc    Delete a milestone
+ * @desc    Delete a milestone (only when planning or change_requested)
  * @route   DELETE /api/milestones/:id
  * @access  Private (Expert only)
  */
 const deleteMilestone = async (req, res, next) => {
-  const { id } = req.params;
-  const userId = req.user.id;
+  const { id }   = req.params;
+  const userId   = req.user.id;
   const userRole = req.user.role;
 
   try {
-    const milestoneQuery = `
-      SELECT m.*, p.expert_id 
-      FROM milestones m
-      JOIN projects p ON m.project_id = p.id
-      WHERE m.id = $1;
-    `;
-    const milestoneRes = await pool.query(milestoneQuery, [id]);
+    const milestoneRes = await pool.query(
+      'SELECT m.*, p.expert_id FROM milestones m JOIN projects p ON m.project_id = p.id WHERE m.id = $1;',
+      [id]
+    );
 
     if (milestoneRes.rows.length === 0) {
       const err = new Error('Milestone not found');
@@ -251,22 +396,89 @@ const deleteMilestone = async (req, res, next) => {
     const milestone = milestoneRes.rows[0];
 
     if (milestone.expert_id !== userId && userRole !== 'admin') {
-      const err = new Error('Forbidden: You can only delete milestones for your own projects');
+      const err = new Error('Forbidden: You can only delete your own milestones');
       err.statusCode = 403;
       return next(err);
     }
 
-    if (milestone.status !== 'pending') {
-      const err = new Error('Forbidden: Only pending milestones can be deleted');
+    if (!['planning', 'change_requested'].includes(milestone.status)) {
+      const err = new Error('Only planning or change-requested milestones can be deleted');
       err.statusCode = 400;
       return next(err);
     }
 
     await pool.query('DELETE FROM milestones WHERE id = $1', [id]);
 
+    return res.status(200).json({ success: true, message: 'Milestone deleted' });
+  } catch (error) {
+    return next(error);
+  }
+};
+
+/**
+ * @desc    Start a planned milestone (checks sequential order)
+ * @route   PUT /api/milestones/:id/start
+ * @access  Private (Expert only)
+ */
+const startMilestone = async (req, res, next) => {
+  const { id }   = req.params;
+  const userId   = req.user.id;
+  const userRole = req.user.role;
+
+  try {
+    const milestoneRes = await pool.query(
+      `SELECT m.*, p.expert_id, p.status AS project_status
+       FROM milestones m JOIN projects p ON m.project_id = p.id WHERE m.id = $1;`,
+      [id]
+    );
+
+    if (milestoneRes.rows.length === 0) {
+      const err = new Error('Milestone not found');
+      err.statusCode = 404;
+      return next(err);
+    }
+
+    const milestone = milestoneRes.rows[0];
+
+    if (milestone.expert_id !== userId && userRole !== 'admin') {
+      const err = new Error('Forbidden: You can only start your own milestones');
+      err.statusCode = 403;
+      return next(err);
+    }
+
+    if (milestone.status !== 'planned') {
+      const err = new Error('Milestone must be in "planned" state to start');
+      err.statusCode = 400;
+      return next(err);
+    }
+
+    // Enforce sequential order: all milestones with lower position must be finished/pending_payment
+    const blockCheck = await pool.query(
+      `SELECT COUNT(*) FROM milestones
+       WHERE project_id = $1 AND position < $2
+         AND status NOT IN ('finished', 'pending_payment')`,
+      [milestone.project_id, milestone.position]
+    );
+
+    if (parseInt(blockCheck.rows[0].count, 10) > 0) {
+      const err = new Error('Cannot start: a previous milestone is not yet finished');
+      err.statusCode = 400;
+      return next(err);
+    }
+
+    // Compute deadline = today + delivery_days
+    const deadline = new Date();
+    deadline.setDate(deadline.getDate() + (milestone.delivery_days || 7));
+
+    const result = await pool.query(
+      "UPDATE milestones SET status = 'ongoing', deadline = $1 WHERE id = $2 RETURNING *;",
+      [deadline.toISOString(), id]
+    );
+
     return res.status(200).json({
       success: true,
-      message: 'Milestone deleted successfully'
+      message: 'Milestone started',
+      milestone: result.rows[0],
     });
   } catch (error) {
     return next(error);
@@ -274,24 +486,88 @@ const deleteMilestone = async (req, res, next) => {
 };
 
 /**
- * @desc    Start payment / fund / release milestone
- * @route   PUT /api/milestones/:id/pay
+ * @desc    Submit a deliverable link for a milestone
+ * @route   PUT /api/milestones/:id/submit-deliverable
+ * @access  Private (Expert only)
+ * @body    { deliverable_url, deliverable_note }
+ */
+const submitDeliverable = async (req, res, next) => {
+  const { id }   = req.params;
+  const userId   = req.user.id;
+  const userRole = req.user.role;
+  const { deliverable_url, deliverable_note } = req.body;
+
+  if (!deliverable_url || String(deliverable_url).trim() === '') {
+    const err = new Error('Deliverable URL is required');
+    err.statusCode = 400;
+    return next(err);
+  }
+
+  try {
+    const milestoneRes = await pool.query(
+      'SELECT m.*, p.expert_id FROM milestones m JOIN projects p ON m.project_id = p.id WHERE m.id = $1;',
+      [id]
+    );
+
+    if (milestoneRes.rows.length === 0) {
+      const err = new Error('Milestone not found');
+      err.statusCode = 404;
+      return next(err);
+    }
+
+    const milestone = milestoneRes.rows[0];
+
+    if (milestone.expert_id !== userId && userRole !== 'admin') {
+      const err = new Error('Forbidden: You can only submit deliverables for your own milestones');
+      err.statusCode = 403;
+      return next(err);
+    }
+
+    if (!['ongoing', 'revision_requested'].includes(milestone.status)) {
+      const err = new Error('Milestone must be ongoing or revision-requested to submit a deliverable');
+      err.statusCode = 400;
+      return next(err);
+    }
+
+    const result = await pool.query(
+      `UPDATE milestones
+       SET status = 'submitted',
+           deliverable_url  = $1,
+           deliverable_note = $2,
+           change_request_note = NULL
+       WHERE id = $3 RETURNING *;`,
+      [
+        String(deliverable_url).trim(),
+        deliverable_note ? String(deliverable_note).trim() : null,
+        id,
+      ]
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: 'Deliverable submitted for client review',
+      milestone: result.rows[0],
+    });
+  } catch (error) {
+    return next(error);
+  }
+};
+
+/**
+ * @desc    Approve a submitted deliverable (submitted → pending_payment)
+ * @route   PUT /api/milestones/:id/approve-deliverable
  * @access  Private (Client only)
  */
-const payMilestone = async (req, res, next) => {
-  const { id } = req.params;
-  const userId = req.user.id;
+const approveDeliverable = async (req, res, next) => {
+  const { id }   = req.params;
+  const userId   = req.user.id;
   const userRole = req.user.role;
 
   try {
-    // 1. Fetch milestone and verify project/client ownership
-    const milestoneQuery = `
-      SELECT m.*, p.client_id, p.expert_id, p.status as project_status
-      FROM milestones m
-      JOIN projects p ON m.project_id = p.id
-      WHERE m.id = $1;
-    `;
-    const milestoneRes = await pool.query(milestoneQuery, [id]);
+    const milestoneRes = await pool.query(
+      'SELECT m.*, p.client_id FROM milestones m JOIN projects p ON m.project_id = p.id WHERE m.id = $1;',
+      [id]
+    );
 
     if (milestoneRes.rows.length === 0) {
       const err = new Error('Milestone not found');
@@ -302,75 +578,169 @@ const payMilestone = async (req, res, next) => {
     const milestone = milestoneRes.rows[0];
 
     if (milestone.client_id !== userId && userRole !== 'admin') {
-      const err = new Error('Forbidden: Only the client who created the project can pay for milestones');
+      const err = new Error('Forbidden: Only the project client can approve deliverables');
       err.statusCode = 403;
       return next(err);
     }
 
-    if (milestone.status !== 'pending') {
-      const err = new Error('Forbidden: Only pending milestones can be paid');
+    if (milestone.status !== 'submitted') {
+      const err = new Error('Milestone must be in "submitted" state to approve');
       err.statusCode = 400;
       return next(err);
     }
 
-    // 2. Execute payment transaction
-    await pool.query('BEGIN');
-
-    // Update milestone status to 'released'
-    const updateMilestoneRes = await pool.query(
-      "UPDATE milestones SET status = 'released' WHERE id = $1 RETURNING *;",
+    const result = await pool.query(
+      "UPDATE milestones SET status = 'pending_payment' WHERE id = $1 RETURNING *;",
       [id]
     );
-    const updatedMilestone = updateMilestoneRes.rows[0];
+
+    return res.status(200).json({
+      success: true,
+      message: 'Deliverable approved — awaiting payment',
+      milestone: result.rows[0],
+    });
+  } catch (error) {
+    return next(error);
+  }
+};
+
+/**
+ * @desc    Request revision on a submitted deliverable (submitted → revision_requested)
+ * @route   PUT /api/milestones/:id/request-revision
+ * @access  Private (Client only)
+ * @body    { note }
+ */
+const requestRevision = async (req, res, next) => {
+  const { id }   = req.params;
+  const userId   = req.user.id;
+  const userRole = req.user.role;
+  const { note } = req.body;
+
+  try {
+    const milestoneRes = await pool.query(
+      'SELECT m.*, p.client_id FROM milestones m JOIN projects p ON m.project_id = p.id WHERE m.id = $1;',
+      [id]
+    );
+
+    if (milestoneRes.rows.length === 0) {
+      const err = new Error('Milestone not found');
+      err.statusCode = 404;
+      return next(err);
+    }
+
+    const milestone = milestoneRes.rows[0];
+
+    if (milestone.client_id !== userId && userRole !== 'admin') {
+      const err = new Error('Forbidden: Only the project client can request revisions');
+      err.statusCode = 403;
+      return next(err);
+    }
+
+    if (milestone.status !== 'submitted') {
+      const err = new Error('Milestone must be in "submitted" state to request revision');
+      err.statusCode = 400;
+      return next(err);
+    }
+
+    const result = await pool.query(
+      "UPDATE milestones SET status = 'revision_requested', change_request_note = $1 WHERE id = $2 RETURNING *;",
+      [note ? String(note).trim() : null, id]
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: 'Revision requested',
+      milestone: result.rows[0],
+    });
+  } catch (error) {
+    return next(error);
+  }
+};
+
+/**
+ * @desc    Pay for a milestone (pending_payment → finished); completes project if all finished
+ * @route   PUT /api/milestones/:id/pay
+ * @access  Private (Client only)
+ */
+const payMilestone = async (req, res, next) => {
+  const { id }   = req.params;
+  const userId   = req.user.id;
+  const userRole = req.user.role;
+
+  try {
+    const milestoneRes = await pool.query(
+      `SELECT m.*, p.client_id, p.expert_id, p.status AS project_status
+       FROM milestones m JOIN projects p ON m.project_id = p.id WHERE m.id = $1;`,
+      [id]
+    );
+
+    if (milestoneRes.rows.length === 0) {
+      const err = new Error('Milestone not found');
+      err.statusCode = 404;
+      return next(err);
+    }
+
+    const milestone = milestoneRes.rows[0];
+
+    if (milestone.client_id !== userId && userRole !== 'admin') {
+      const err = new Error('Forbidden: Only the project client can pay for milestones');
+      err.statusCode = 403;
+      return next(err);
+    }
+
+    if (milestone.status !== 'pending_payment') {
+      const err = new Error('Milestone must be in "pending_payment" state to pay');
+      err.statusCode = 400;
+      return next(err);
+    }
+
+    await pool.query('BEGIN');
+
+    // Mark milestone as finished
+    const updatedMilestoneRes = await pool.query(
+      "UPDATE milestones SET status = 'finished' WHERE id = $1 RETURNING *;",
+      [id]
+    );
+    const updatedMilestone = updatedMilestoneRes.rows[0];
 
     // Log transaction
-    const transactionQuery = `
-      INSERT INTO transactions (project_id, sender_id, receiver_id, amount, type, status, complete_at)
-      VALUES ($1, $2, $3, $4, 'escrow_release', 'completed', CURRENT_TIMESTAMP)
-      RETURNING *;
-    `;
-    const transactionRes = await pool.query(transactionQuery, [
-      milestone.project_id,
-      milestone.client_id,
-      milestone.expert_id,
-      milestone.amount
-    ]);
+    const transactionRes = await pool.query(
+      `INSERT INTO transactions (project_id, sender_id, receiver_id, amount, type, status, complete_at)
+       VALUES ($1, $2, $3, $4, 'escrow_release', 'completed', CURRENT_TIMESTAMP) RETURNING *;`,
+      [milestone.project_id, milestone.client_id, milestone.expert_id, milestone.amount]
+    );
     const transaction = transactionRes.rows[0];
 
-    // Log payment
+    // Log payment record
     await pool.query(
       `INSERT INTO payments (project_id, transaction_id, user_id, amount, type)
        VALUES ($1, $2, $3, $4, 'momo');`,
       [milestone.project_id, transaction.id, milestone.client_id, milestone.amount]
     );
 
-    // Check if all milestones of the project are now released
-    const allMilestonesQuery = `
-      SELECT status FROM milestones
-      WHERE project_id = $1;
-    `;
-    const allMilestonesRes = await pool.query(allMilestonesQuery, [milestone.project_id]);
-    const allMilestones = allMilestonesRes.rows;
+    // Check if ALL milestones are now finished → complete the project
+    const allMilestonesRes = await pool.query(
+      'SELECT status FROM milestones WHERE project_id = $1;',
+      [milestone.project_id]
+    );
+    const allFinished =
+      allMilestonesRes.rows.length > 0 &&
+      allMilestonesRes.rows.every((m) => m.status === 'finished');
 
-    const allReleased = allMilestones.length > 0 && allMilestones.every(m => m.status === 'released');
-
-    if (allReleased) {
-      // Auto-fill end_date and set status to 'completed'
-      const updateProjectQuery = `
-        UPDATE projects
-        SET status = 'completed', end_date = CURRENT_TIMESTAMP
-        WHERE id = $1;
-      `;
-      await pool.query(updateProjectQuery, [milestone.project_id]);
+    if (allFinished) {
+      await pool.query(
+        "UPDATE projects SET status = 'completed', end_date = CURRENT_TIMESTAMP WHERE id = $1;",
+        [milestone.project_id]
+      );
     }
 
     await pool.query('COMMIT');
 
     return res.status(200).json({
       success: true,
-      message: 'Milestone payment completed successfully',
+      message: 'Payment processed successfully',
       milestone: updatedMilestone,
-      projectCompleted: allReleased
+      projectCompleted: allFinished,
     });
   } catch (error) {
     await pool.query('ROLLBACK');
@@ -379,9 +749,15 @@ const payMilestone = async (req, res, next) => {
 };
 
 module.exports = {
-  createMilestone,
+  submitMilestonePlan,
   getMilestonesByProject,
+  approveMilestonePlan,
+  requestPlanChanges,
   updateMilestone,
   deleteMilestone,
-  payMilestone
+  startMilestone,
+  submitDeliverable,
+  approveDeliverable,
+  requestRevision,
+  payMilestone,
 };

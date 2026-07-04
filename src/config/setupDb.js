@@ -118,6 +118,35 @@ async function initDatabase() {
     await client.query('ALTER TABLE job_posts DROP COLUMN IF EXISTS deadline;');
     console.log('Deadline column check/removal done.');
 
+    // Add milestone lifecycle columns
+    console.log('Adding milestone lifecycle columns...');
+    await client.query('ALTER TABLE milestones ADD COLUMN IF NOT EXISTS position INTEGER DEFAULT 0;');
+    await client.query('ALTER TABLE milestones ADD COLUMN IF NOT EXISTS delivery_days INTEGER;');
+    await client.query('ALTER TABLE milestones ADD COLUMN IF NOT EXISTS deadline TIMESTAMP;');
+    await client.query('ALTER TABLE milestones ADD COLUMN IF NOT EXISTS change_request_note TEXT;');
+    await client.query('ALTER TABLE milestones ADD COLUMN IF NOT EXISTS deliverable_url TEXT;');
+    await client.query('ALTER TABLE milestones ADD COLUMN IF NOT EXISTS deliverable_note TEXT;');
+    console.log('Milestone lifecycle columns added.');
+
+    // Add new milestone_status enum values
+    const newMilestoneStatuses = [
+      'planning', 'change_requested', 'planned', 'ongoing',
+      'submitted', 'revision_requested', 'pending_payment', 'finished'
+    ];
+    console.log('Adding new milestone status enum values...');
+    for (const val of newMilestoneStatuses) {
+      try {
+        await client.query(`ALTER TYPE milestone_status ADD VALUE IF NOT EXISTS '${val}';`);
+      } catch (err) {
+        if (err.code !== '42704') { // 42704 = undefined_object (type not an enum)
+          console.warn(`Non-fatal: could not add milestone_status value '${val}':`, err.message);
+        }
+      }
+    }
+    console.log('Milestone status enum values checked/added.');
+
+
+
   } catch (err) {
     console.error('Error during database initialization:', err);
     throw err;

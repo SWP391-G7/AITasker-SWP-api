@@ -1,21 +1,36 @@
 const express = require('express');
-const router = express.Router();
+const router  = express.Router();
 const { protect } = require('../middleware/authMiddleware');
 const {
-  createMilestone,
+  submitMilestonePlan,
   getMilestonesByProject,
+  approveMilestonePlan,
+  requestPlanChanges,
   updateMilestone,
   deleteMilestone,
-  payMilestone
+  startMilestone,
+  submitDeliverable,
+  approveDeliverable,
+  requestRevision,
+  payMilestone,
 } = require('../controllers/milestoneController');
 
 // All milestone routes require authentication
 router.use(protect);
 
-router.post('/project/:projectId', createMilestone);
-router.get('/project/:projectId', getMilestonesByProject);
-router.put('/:id', updateMilestone);
-router.delete('/:id', deleteMilestone);
-router.put('/:id/pay', payMilestone);
+// ── Project-level routes (must come BEFORE /:id routes) ──────────────────────
+router.post('/project/:projectId/submit-plan',  submitMilestonePlan);
+router.get( '/project/:projectId',              getMilestonesByProject);
+router.put( '/project/:projectId/approve-plan', approveMilestonePlan);
+router.put( '/project/:projectId/request-changes', requestPlanChanges);
+
+// ── Milestone-level routes ───────────────────────────────────────────────────
+router.put('/:id/start',               startMilestone);
+router.put('/:id/submit-deliverable',   submitDeliverable);
+router.put('/:id/approve-deliverable',  approveDeliverable);
+router.put('/:id/request-revision',     requestRevision);
+router.put('/:id/pay',                  payMilestone);
+router.put('/:id',                      updateMilestone);
+router.delete('/:id',                   deleteMilestone);
 
 module.exports = router;
