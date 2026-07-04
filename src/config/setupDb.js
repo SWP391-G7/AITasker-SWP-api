@@ -128,17 +128,31 @@ async function initDatabase() {
     await client.query('ALTER TABLE milestones ADD COLUMN IF NOT EXISTS deliverable_note TEXT;');
     console.log('Milestone lifecycle columns added.');
 
+    // Add new project_status enum values
+    const newProjectStatuses = ['Planning', 'On-going', 'Completed'];
+    console.log('Adding new project status enum values...');
+    for (const val of newProjectStatuses) {
+      try {
+        await client.query(`ALTER TYPE project_status ADD VALUE IF NOT EXISTS '${val}';`);
+      } catch (err) {
+        if (err.code !== '42710' && err.code !== '42704') {
+          console.warn(`Non-fatal: could not add project_status value '${val}':`, err.message);
+        }
+      }
+    }
+
     // Add new milestone_status enum values
     const newMilestoneStatuses = [
       'planning', 'change_requested', 'planned', 'ongoing',
-      'submitted', 'revision_requested', 'pending_payment', 'finished'
+      'submitted', 'revision_requested', 'pending_payment', 'finished',
+      'Pending', 'Approved', 'Declined', 'Wait for payment', 'Finished'
     ];
     console.log('Adding new milestone status enum values...');
     for (const val of newMilestoneStatuses) {
       try {
         await client.query(`ALTER TYPE milestone_status ADD VALUE IF NOT EXISTS '${val}';`);
       } catch (err) {
-        if (err.code !== '42704') { // 42704 = undefined_object (type not an enum)
+        if (err.code !== '42710' && err.code !== '42704') {
           console.warn(`Non-fatal: could not add milestone_status value '${val}':`, err.message);
         }
       }

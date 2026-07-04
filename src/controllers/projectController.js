@@ -96,7 +96,7 @@ const createProject = async (req, res, next) => {
     // 1. Create the project
     const insertQuery = `
       INSERT INTO projects (expert_id, client_id, type, status, total_amount, title, description)
-      VALUES ($1, $2, 'fixed_milestone', 'active', $3, $4, $5)
+      VALUES ($1, $2, 'fixed_milestone', 'Planning', $3, $4, $5)
       RETURNING *;
     `;
     const projectValues = [

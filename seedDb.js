@@ -145,22 +145,22 @@ async function seedDatabase() {
     console.log('\nSeeding Job Posts (Client Tasks)...');
     
     const jobRes1 = await client.query(`
-      INSERT INTO job_posts (client_id, title, description, budget_min, budget_max, required_skill, duration_days, status, deadline)
-      VALUES ($1, 'NLP Document Parser for Legal Contracts', 'We need an expert to build a parser that extracts key dates, termination clauses, and financial terms from legal PDFs. Output must be structured JSON.', 1000.00, 3000.00, 'NLP, Python', 10, 'open', NOW() + INTERVAL '30 days')
+      INSERT INTO job_posts (client_id, title, description, budget_min, budget_max, required_skill, duration_days, status)
+      VALUES ($1, 'NLP Document Parser for Legal Contracts', 'We need an expert to build a parser that extracts key dates, termination clauses, and financial terms from legal PDFs. Output must be structured JSON.', 1000.00, 3000.00, 'NLP, Python', 10, 'open')
       RETURNING id;
     `, [clientIds['client1@example.com']]);
     const job1Id = jobRes1.rows[0].id;
 
     const jobRes2 = await client.query(`
-      INSERT INTO job_posts (client_id, title, description, budget_min, budget_max, required_skill, duration_days, status, deadline)
-      VALUES ($1, 'AI Medical Image Segmentation Model', 'Train a model (e.g. UNet) on MRI scans to segment brain tumors. Vetted experts only with medical AI background. Data is annotated.', 3000.00, 8000.00, 'Computer Vision, PyTorch', 30, 'closed', NOW() + INTERVAL '45 days')
+      INSERT INTO job_posts (client_id, title, description, budget_min, budget_max, required_skill, duration_days, status)
+      VALUES ($1, 'AI Medical Image Segmentation Model', 'Train a model (e.g. UNet) on MRI scans to segment brain tumors. Vetted experts only with medical AI background. Data is annotated.', 3000.00, 8000.00, 'Computer Vision, PyTorch', 30, 'closed')
       RETURNING id;
     `, [clientIds['client2@example.com']]);
     const job2Id = jobRes2.rows[0].id;
 
     const jobRes3 = await client.query(`
-      INSERT INTO job_posts (client_id, title, description, budget_min, budget_max, required_skill, duration_days, status, deadline)
-      VALUES ($1, 'Personalized Math Tutor Chatbot', 'Build a chatbot helper for student math problems. Must integrate with LaTeX rendering and handle algebra, calculus questions using step-by-step reasoning.', 1500.00, 2500.00, 'AI Integration, Gen AI', 15, 'closed', NOW() + INTERVAL '15 days')
+      INSERT INTO job_posts (client_id, title, description, budget_min, budget_max, required_skill, duration_days, status)
+      VALUES ($1, 'Personalized Math Tutor Chatbot', 'Build a chatbot helper for student math problems. Must integrate with LaTeX rendering and handle algebra, calculus questions using step-by-step reasoning.', 1500.00, 2500.00, 'AI Integration, Gen AI', 15, 'closed')
       RETURNING id;
     `, [clientIds['client3@example.com']]);
     const job3Id = jobRes3.rows[0].id;
