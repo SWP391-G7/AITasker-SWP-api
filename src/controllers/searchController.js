@@ -59,7 +59,7 @@ const searchEntities = async (req, res, next) => {
         WHERE 1=1
       `;
       if (!includeClosed) {
-        queryText += " AND j.status != 'closed'";
+        queryText += " AND j.status != 'closed' AND j.status != 'pending'";
       }
 
       if (query && query.trim() !== '') {
@@ -190,11 +190,21 @@ const searchEntities = async (req, res, next) => {
 
     const result = await pool.query(queryText, values);
 
+    let finalResults = result.rows;
+    if (target === 'jobs') {
+      finalResults = result.rows.map(row => {
+        if (row.status === 'pending') {
+          return { ...row, status: 'closed' };
+        }
+        return row;
+      });
+    }
+
     return res.status(200).json({
       success: true,
       target,
-      count: result.rows.length,
-      results: result.rows
+      count: finalResults.length,
+      results: finalResults
     });
 
   } catch (error) {

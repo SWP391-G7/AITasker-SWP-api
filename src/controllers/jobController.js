@@ -22,8 +22,7 @@ const createJobPost = async (req, res, next) => {
     budgetMin,
     budgetMax,
     requiredSkill,
-    durationDays,
-    deadline
+    durationDays
   } = req.body
 
   // 2. Input Validation
@@ -71,15 +70,7 @@ const createJobPost = async (req, res, next) => {
     errors.requiredSkill = 'Required skill cannot exceed 255 characters'
   }
 
-  let parsedDeadline = null
-  if (deadline) {
-    parsedDeadline = new Date(deadline)
-    if (isNaN(parsedDeadline.getTime())) {
-      errors.deadline = 'Invalid deadline date'
-    } else if (parsedDeadline <= new Date()) {
-      errors.deadline = 'Deadline must be a date in the future'
-    }
-  }
+
 
   if (Object.keys(errors).length > 0) {
     const err = new Error('Validation failed')
@@ -104,10 +95,9 @@ const createJobPost = async (req, res, next) => {
         budget_min,
         budget_max,
         required_skill,
-        duration_days,
-        deadline
+        duration_days
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      VALUES ($1, $2, $3, $4, $5, $6, $7)
       RETURNING *;
     `
 
@@ -118,8 +108,7 @@ const createJobPost = async (req, res, next) => {
       parsedBudgetMin,
       parsedBudgetMax,
       requiredSkill ? requiredSkill.trim() : null,
-      parsedDurationDays,
-      parsedDeadline
+      parsedDurationDays
     ]
 
     const result = await pool.query(insertQuery, values)
@@ -184,10 +173,16 @@ const getJobById = async (req, res, next) => {
       return next(err)
     }
 
+    const jobPost = result.rows[0]
+    // If the job is in pending status, only show it as pending to the client owner; show as closed to anyone else
+    if (jobPost.status === 'pending' && (!req.user || jobPost.client_id !== req.user.id)) {
+      jobPost.status = 'closed';
+    }
+
     return res.status(200).json({
       success: true,
-      jobPost: result.rows[0],
-      data: result.rows[0]
+      jobPost: jobPost,
+      data: jobPost
     })
   } catch (error) {
     return next(error)
@@ -202,7 +197,7 @@ const getJobById = async (req, res, next) => {
 const updateJobPost = async (req, res, next) => {
   const { id } = req.params
   const userId = req.user.id
-  const { title, description, budgetMin, budgetMax, requiredSkill, durationDays, deadline } = req.body
+  const { title, description, budgetMin, budgetMax, requiredSkill, durationDays } = req.body
 
   try {
     // Check if job exists and belongs to current user
@@ -261,11 +256,7 @@ const updateJobPost = async (req, res, next) => {
       paramCount++
     }
 
-    if (deadline !== undefined) {
-      updates.push(`deadline = $${paramCount}`)
-      values.push(deadline)
-      paramCount++
-    }
+
 
     if (updates.length === 0) {
       const err = new Error('No fields to update')

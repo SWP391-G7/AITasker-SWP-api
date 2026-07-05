@@ -68,6 +68,106 @@ async function initDatabase() {
     await client.query('ALTER TABLE expert_profiles ADD COLUMN IF NOT EXISTS portfolio_url VARCHAR(255);');
     console.log('Onboarding columns checked/added successfully.');
     
+    // Add pending status to job_status enum
+    console.log('Ensuring job_status enum has "pending" status...');
+    try {
+      await client.query("ALTER TYPE job_status ADD VALUE 'pending';");
+      console.log('Added pending status to job_status enum.');
+    } catch (err) {
+      if (err.code !== '42710') {
+        console.warn('Non-fatal warning adding pending status to job_status enum:', err.message);
+      } else {
+        console.log('Pending status already exists in job_status enum.');
+      }
+    }
+
+    // Add closed status to job_status enum
+    console.log('Ensuring job_status enum has "closed" status...');
+    try {
+      await client.query("ALTER TYPE job_status ADD VALUE 'closed';");
+      console.log('Added closed status to job_status enum.');
+    } catch (err) {
+      if (err.code !== '42710') {
+        console.warn('Non-fatal warning adding closed status to job_status enum:', err.message);
+      } else {
+        console.log('Closed status already exists in job_status enum.');
+      }
+    }
+
+    // Add counter-proposal columns to proposals table
+    console.log('Ensuring proposals table has counter-proposal columns...');
+    await client.query('ALTER TABLE proposals ADD COLUMN IF NOT EXISTS counter_bid_amount NUMERIC(10, 2);');
+    await client.query('ALTER TABLE proposals ADD COLUMN IF NOT EXISTS counter_cover_letter TEXT;');
+    await client.query('ALTER TABLE proposals ADD COLUMN IF NOT EXISTS counter_initiated_by UUID;');
+    console.log('Counter-proposal columns checked/added successfully.');
+
+    // Add countered status to proposal_status enum
+    console.log('Ensuring proposal_status enum has "countered" status...');
+    try {
+      await client.query("ALTER TYPE proposal_status ADD VALUE 'countered';");
+      console.log('Added countered status to proposal_status enum.');
+    } catch (err) {
+      if (err.code !== '42710') {
+        console.warn('Non-fatal warning adding countered status to proposal_status enum:', err.message);
+      } else {
+        console.log('Countered status already exists in proposal_status enum.');
+      }
+    }
+
+    // Add title and description to projects table
+    console.log('Ensuring projects table has title and description columns...');
+    await client.query('ALTER TABLE projects ADD COLUMN IF NOT EXISTS title VARCHAR(255);');
+    await client.query('ALTER TABLE projects ADD COLUMN IF NOT EXISTS description TEXT;');
+    console.log('Projects table columns checked/added successfully.');
+
+    // Remove deprecated deadline column from job_posts (replaced by duration_days)
+    console.log('Removing deprecated deadline column from job_posts if present...');
+    await client.query('ALTER TABLE job_posts DROP COLUMN IF EXISTS deadline;');
+    console.log('Deadline column check/removal done.');
+
+    // Add milestone lifecycle columns
+    console.log('Adding milestone lifecycle columns...');
+    await client.query('ALTER TABLE milestones ADD COLUMN IF NOT EXISTS position INTEGER DEFAULT 0;');
+    await client.query('ALTER TABLE milestones ADD COLUMN IF NOT EXISTS delivery_days INTEGER;');
+    await client.query('ALTER TABLE milestones ADD COLUMN IF NOT EXISTS deadline TIMESTAMP;');
+    await client.query('ALTER TABLE milestones ADD COLUMN IF NOT EXISTS change_request_note TEXT;');
+    await client.query('ALTER TABLE milestones ADD COLUMN IF NOT EXISTS deliverable_url TEXT;');
+    await client.query('ALTER TABLE milestones ADD COLUMN IF NOT EXISTS deliverable_note TEXT;');
+    console.log('Milestone lifecycle columns added.');
+
+    // Add new project_status enum values
+    const newProjectStatuses = ['Planning', 'On-going', 'Completed'];
+    console.log('Adding new project status enum values...');
+    for (const val of newProjectStatuses) {
+      try {
+        await client.query(`ALTER TYPE project_status ADD VALUE IF NOT EXISTS '${val}';`);
+      } catch (err) {
+        if (err.code !== '42710' && err.code !== '42704') {
+          console.warn(`Non-fatal: could not add project_status value '${val}':`, err.message);
+        }
+      }
+    }
+
+    // Add new milestone_status enum values
+    const newMilestoneStatuses = [
+      'planning', 'change_requested', 'planned', 'ongoing',
+      'submitted', 'revision_requested', 'pending_payment', 'finished',
+      'Pending', 'Approved', 'Declined', 'Wait for payment', 'Finished'
+    ];
+    console.log('Adding new milestone status enum values...');
+    for (const val of newMilestoneStatuses) {
+      try {
+        await client.query(`ALTER TYPE milestone_status ADD VALUE IF NOT EXISTS '${val}';`);
+      } catch (err) {
+        if (err.code !== '42710' && err.code !== '42704') {
+          console.warn(`Non-fatal: could not add milestone_status value '${val}':`, err.message);
+        }
+      }
+    }
+    console.log('Milestone status enum values checked/added.');
+
+
+
   } catch (err) {
     console.error('Error during database initialization:', err);
     throw err;

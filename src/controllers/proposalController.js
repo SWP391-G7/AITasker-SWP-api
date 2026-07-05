@@ -178,6 +178,67 @@ const getProposalsByJob = async (req, res, next) => {
 }
 
 /**
+ * @desc    Get a single proposal by ID
+ * @route   GET /api/proposals/:id
+ * @access  Private (expert who owns it OR client who owns the job)
+ */
+const getProposalById = async (req, res, next) => {
+  const { id } = req.params;
+  const userId = req.user.id;
+  const userRole = req.user.role;
+
+  try {
+    const query = `
+      SELECT
+        p.*,
+        j.title        AS job_title,
+        j.description  AS job_description,
+        j.status       AS job_status,
+        j.budget_min,
+        j.budget_max,
+        j.duration_days,
+        j.client_id,
+        u_expert.full_name AS expert_name,
+        u_client.full_name AS client_name,
+        ep.professional_title
+      FROM proposals p
+      JOIN job_posts     j        ON p.job_id    = j.id
+      JOIN users         u_expert ON p.expert_id = u_expert.id
+      JOIN users         u_client ON j.client_id = u_client.id
+      LEFT JOIN expert_profiles ep ON p.expert_id = ep.id
+      WHERE p.id = $1;
+    `;
+    const result = await pool.query(query, [id]);
+
+    if (result.rows.length === 0) {
+      const err = new Error('Proposal not found');
+      err.statusCode = 404;
+      return next(err);
+    }
+
+    const proposal = result.rows[0];
+
+    // Access control: only the expert who submitted it, the client who owns the job, or admin
+    if (
+      userRole !== 'admin' &&
+      proposal.expert_id !== userId &&
+      proposal.client_id !== userId
+    ) {
+      const err = new Error('Forbidden: You do not have access to this proposal');
+      err.statusCode = 403;
+      return next(err);
+    }
+
+    return res.status(200).json({
+      success: true,
+      proposal
+    });
+  } catch (error) {
+    return next(error);
+  }
+};
+
+/**
  * @desc    Update a proposal
  * @route   PUT /api/proposals/:id
  * @access  Private (Owner expert only)
@@ -323,15 +384,15 @@ const deleteProposal = async (req, res, next) => {
 }
 
 /**
- * @desc    Update a proposal's status (Accept / Reject)
+ * @desc    Update a proposal's status (Accept / Reject) — works for both client and expert
  * @route   PUT /api/proposals/:id/status
- * @access  Private (Owner client of the job post only)
+ * @access  Private
  */
 const updateProposalStatus = async (req, res, next) => {
   const { id } = req.params;
   const userId = req.user.id;
   const userRole = req.user.role;
-  let { status } = req.body;
+  let { status, start_project } = req.body;
 
   if (!status) {
     const err = new Error('Status is required');
@@ -353,7 +414,7 @@ const updateProposalStatus = async (req, res, next) => {
   try {
     // 1. Fetch proposal and join with job post to verify ownership
     const proposalQuery = `
-      SELECT p.*, j.client_id, j.status as job_status
+      SELECT p.*, j.client_id, j.status as job_status, j.title as job_title, j.description as job_description
       FROM proposals p
       JOIN job_posts j ON p.job_id = j.id
       WHERE p.id = $1
@@ -368,8 +429,17 @@ const updateProposalStatus = async (req, res, next) => {
 
     const proposal = proposalRes.rows[0];
 
-    // Verify ownership: client of the job post, or admin
-    if (proposal.client_id !== userId && userRole !== 'admin') {
+    const isClient = userRole === 'client' && proposal.client_id === userId;
+    const isExpert = userRole === 'expert' && proposal.expert_id === userId;
+
+    // Expert can only approve/reject when the counter was initiated by the client (it's their turn)
+    if (isExpert) {
+      if (proposal.status !== 'countered' || proposal.counter_initiated_by === userId) {
+        const err = new Error('Forbidden: You can only respond to a counter-proposal made by the client');
+        err.statusCode = 403;
+        return next(err);
+      }
+    } else if (!isClient && userRole !== 'admin') {
       const err = new Error('Forbidden: You can only update proposals for your own job posts');
       err.statusCode = 403;
       return next(err);
@@ -378,25 +448,58 @@ const updateProposalStatus = async (req, res, next) => {
     // 2. Start transaction
     await pool.query('BEGIN');
 
-    // 3. Update the proposal status
+    // 3. If approving a counter, adopt the counter_bid_amount as the final bid
+    let finalBidAmount = proposal.bid_amount;
+    if (status === 'accepted' && proposal.status === 'countered' && proposal.counter_bid_amount) {
+      finalBidAmount = proposal.counter_bid_amount;
+    }
+
+    // 4. Update the proposal status
     const updateProposalQuery = `
       UPDATE proposals
-      SET status = $1
-      WHERE id = $2
+      SET status = $1, bid_amount = $2
+      WHERE id = $3
       RETURNING *;
     `;
-    const updatedProposalRes = await pool.query(updateProposalQuery, [status, id]);
+    const updatedProposalRes = await pool.query(updateProposalQuery, [status, finalBidAmount, id]);
     const updatedProposal = updatedProposalRes.rows[0];
 
-    // 4. If status is accepted, update the job post status to 'closed'
+    let createdProject = null;
+
+    // 5. If status is accepted, handle job status and project creation
     if (status === 'accepted') {
-      const updateJobQuery = `
-        UPDATE job_posts
-        SET status = 'closed'
-        WHERE id = $1
-        RETURNING *;
-      `;
-      await pool.query(updateJobQuery, [proposal.job_id]);
+      if (start_project === false || isExpert) {
+        // Expert approving → job goes to pending; client must click Create Project
+        const updateJobQuery = `
+          UPDATE job_posts
+          SET status = 'pending'
+          WHERE id = $1;
+        `;
+        await pool.query(updateJobQuery, [proposal.job_id]);
+      } else {
+        // Client accepting with immediate start → close job and auto-create project
+        const updateJobQuery = `
+          UPDATE job_posts
+          SET status = 'closed'
+          WHERE id = $1;
+        `;
+        await pool.query(updateJobQuery, [proposal.job_id]);
+
+        // Auto create project
+        const insertProjectQuery = `
+          INSERT INTO projects (expert_id, client_id, type, status, total_amount, title, description)
+          VALUES ($1, $2, 'fixed_milestone', 'active', $3, $4, $5)
+          RETURNING *;
+        `;
+        const projectRes = await pool.query(insertProjectQuery, [
+          proposal.expert_id,
+          proposal.client_id,
+          finalBidAmount,
+          proposal.job_title,
+          proposal.job_description
+        ]);
+        createdProject = projectRes.rows[0];
+      }
     }
 
     await pool.query('COMMIT');
@@ -404,7 +507,8 @@ const updateProposalStatus = async (req, res, next) => {
     return res.status(200).json({
       success: true,
       message: `Proposal status updated to ${status} successfully.`,
-      proposal: updatedProposal
+      proposal: updatedProposal,
+      project: createdProject
     });
 
   } catch (error) {
@@ -413,10 +517,143 @@ const updateProposalStatus = async (req, res, next) => {
   }
 };
 
+/**
+ * @desc    Counter a proposal with a new bid amount (client -> expert or expert -> client)
+ * @route   PUT /api/proposals/:id/counter
+ * @access  Private (Client who owns the job OR Expert who owns the proposal)
+ */
+const counterProposal = async (req, res, next) => {
+  const { id } = req.params;
+  const userId = req.user.id;
+  const userRole = req.user.role;
+  const { bid_amount, cover_letter } = req.body;
+
+  // Validate bid_amount
+  const parsedBidAmount = parseFloat(bid_amount);
+  if (!bid_amount || isNaN(parsedBidAmount) || parsedBidAmount <= 0) {
+    const err = new Error('A valid bid amount is required for a counter-proposal');
+    err.statusCode = 400;
+    return next(err);
+  }
+
+  try {
+    // Fetch proposal + job ownership info
+    const proposalQuery = `
+      SELECT p.*, j.client_id, j.status as job_status
+      FROM proposals p
+      JOIN job_posts j ON p.job_id = j.id
+      WHERE p.id = $1
+    `;
+    const proposalRes = await pool.query(proposalQuery, [id]);
+    if (proposalRes.rows.length === 0) {
+      const err = new Error('Proposal not found');
+      err.statusCode = 404;
+      return next(err);
+    }
+    const proposal = proposalRes.rows[0];
+
+    // Only the client who owns the job OR the expert who submitted the proposal can counter
+    const isClient = userRole === 'client' && proposal.client_id === userId;
+    const isExpert = userRole === 'expert' && proposal.expert_id === userId;
+    if (!isClient && !isExpert && userRole !== 'admin') {
+      const err = new Error('Forbidden: You are not a party to this proposal');
+      err.statusCode = 403;
+      return next(err);
+    }
+
+    // Cannot counter an already accepted or rejected proposal
+    if (proposal.status === 'accepted' || proposal.status === 'rejected') {
+      const err = new Error(`Cannot counter a proposal that is already ${proposal.status}`);
+      err.statusCode = 400;
+      return next(err);
+    }
+
+    // Prevent countering your own counter (must wait for the other party)
+    if (proposal.status === 'countered' && proposal.counter_initiated_by === userId) {
+      const err = new Error('You already sent a counter-proposal. Wait for the other party to respond.');
+      err.statusCode = 400;
+      return next(err);
+    }
+
+    // Update proposal with counter fields
+    const updateQuery = `
+      UPDATE proposals
+      SET
+        status = 'countered',
+        counter_bid_amount = $1,
+        counter_cover_letter = $2,
+        counter_initiated_by = $3
+      WHERE id = $4
+      RETURNING *;
+    `;
+    const result = await pool.query(updateQuery, [
+      parsedBidAmount,
+      cover_letter ? cover_letter.trim() : null,
+      userId,
+      id
+    ]);
+
+    return res.status(200).json({
+      success: true,
+      message: 'Counter-proposal submitted successfully',
+      proposal: result.rows[0]
+    });
+  } catch (error) {
+    return next(error);
+  }
+};
+
+/**
+ * @desc    Get all proposals submitted by the authenticated expert
+ * @route   GET /api/proposals/my
+ * @access  Private (Expert only)
+ */
+const getMyProposals = async (req, res, next) => {
+  const userId = req.user.id;
+  const userRole = req.user.role;
+
+  if (userRole !== 'expert' && userRole !== 'admin') {
+    const err = new Error('Forbidden: Only experts can access their proposals.');
+    err.statusCode = 403;
+    return next(err);
+  }
+
+  try {
+    const query = `
+      SELECT
+        p.*,
+        j.title        AS job_title,
+        j.description  AS job_description,
+        j.status       AS job_status,
+        j.budget_min,
+        j.budget_max,
+        j.duration_days,
+        u.full_name    AS client_name
+      FROM proposals p
+      JOIN job_posts  j ON p.job_id    = j.id
+      JOIN users      u ON j.client_id = u.id
+      WHERE p.expert_id = $1
+      ORDER BY p.id DESC;
+    `;
+
+    const result = await pool.query(query, [userId]);
+
+    return res.status(200).json({
+      success: true,
+      proposals: result.rows
+    });
+  } catch (error) {
+    return next(error);
+  }
+};
+
 module.exports = {
   createProposal,
+  getMyProposals,
   getProposalsByJob,
+  getProposalById,
   updateProposal,
   deleteProposal,
-  updateProposalStatus
+  updateProposalStatus,
+  counterProposal
 }

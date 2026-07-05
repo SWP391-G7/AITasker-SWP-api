@@ -6,7 +6,7 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 -- ==========================================
 CREATE TYPE user_role AS ENUM ('client', 'expert', 'admin');
 CREATE TYPE pricing_type AS ENUM ('fixed', 'hourly');
-CREATE TYPE job_status AS ENUM ('open', 'closed');
+CREATE TYPE job_status AS ENUM ('open', 'active', 'completed', 'cancelled', 'closed');
 CREATE TYPE proposal_status AS ENUM ('pending', 'accepted', 'rejected');
 CREATE TYPE ai_module_type AS ENUM ('job_assistant', 'service_generator', 'matchmaking');
 CREATE TYPE project_type AS ENUM ('fixed_milestone', 'hourly_contract');
@@ -148,10 +148,12 @@ CREATE TABLE milestones (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
     title VARCHAR(255) NOT NULL,
+    content TEXT,
     amount NUMERIC(10, 2) NOT NULL,
     status milestone_status DEFAULT 'pending',
     due_date TIMESTAMP,
-    deliverable TEXT
+    response TEXT DEFAULT NULL,
+    deliverable BOOLEAN DEFAULT false
 );
 
 -- 13. TRANSACTION TABLE
