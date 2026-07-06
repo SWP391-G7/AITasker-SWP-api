@@ -56,6 +56,69 @@ const requestPasswordReset = async (req, res, next) => {
   }
 };
 
+const verifyPasswordResetCode = async (req, res, next) => {
+  const { email, code } = req.body;
+
+  if (!email || !isValidEmail(email)) {
+    const err = new Error('A valid email address is required');
+    err.statusCode = 400;
+    return next(err);
+  }
+
+  if (!code || code.length !== 6 || isNaN(code)) {
+    const err = new Error('Code must be a 6-digit number');
+    err.statusCode = 400;
+    return next(err);
+  }
+
+  const normalizedEmail = email.toLowerCase().trim();
+
+  try {
+    const findCodeQuery = `
+      SELECT code, expires_at, is_used
+      FROM email_verification_codes
+      WHERE email = $1
+      ORDER BY created_at DESC
+      LIMIT 1;
+    `;
+    const codeRes = await pool.query(findCodeQuery, [normalizedEmail]);
+
+    if (codeRes.rows.length === 0) {
+      const err = new Error('No password reset code found for this email');
+      err.statusCode = 404;
+      return next(err);
+    }
+
+    const verificationRecord = codeRes.rows[0];
+
+    if (verificationRecord.is_used) {
+      const err = new Error('This code has already been used');
+      err.statusCode = 400;
+      return next(err);
+    }
+
+    if (new Date() > new Date(verificationRecord.expires_at)) {
+      const err = new Error('Password reset code has expired');
+      err.statusCode = 400;
+      return next(err);
+    }
+
+    if (verificationRecord.code !== code) {
+      const err = new Error('Invalid password reset code');
+      err.statusCode = 400;
+      return next(err);
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: 'Password reset code verified'
+    });
+  } catch (err) {
+    console.error('Error verifying password reset code:', err);
+    return next(err);
+  }
+};
+
 const resetPassword = async (req, res, next) => {
   const { email, code, newPassword } = req.body;
 
@@ -152,5 +215,6 @@ const resetPassword = async (req, res, next) => {
 
 module.exports = {
   requestPasswordReset,
+  verifyPasswordResetCode,
   resetPassword
 };
