@@ -161,6 +161,14 @@ const login = async (req, res, next) => {
 
     const user = userRes.rows[0]
 
+    // Check if user is deactivated/banned
+    if (user.acc_status === false) {
+      const err = new Error('Account has been deactivated due to violation.')
+      err.statusCode = 403
+      err.code = 'ACCOUNT_DEACTIVATED'
+      return next(err)
+    }
+
     // 2. Compare passwords
     const isMatch = await bcrypt.compare(password, user.password)
     if (!isMatch) {
@@ -301,6 +309,13 @@ const googleLogin = async (req, res, next) => {
 
     if (userRes.rows.length > 0) {
       user = userRes.rows[0]
+      // Check if user is deactivated/banned
+      if (user.acc_status === false) {
+        const err = new Error('Account has been deactivated due to violation.')
+        err.statusCode = 403
+        err.code = 'ACCOUNT_DEACTIVATED'
+        return next(err)
+      }
     } else {
       // Create a new user with Google account details
       isNewUser = true

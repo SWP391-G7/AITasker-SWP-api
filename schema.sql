@@ -29,7 +29,8 @@ CREATE TABLE users (
     email VARCHAR(255) UNIQUE NOT NULL,
     role user_role NOT NULL,
     is_verified BOOLEAN DEFAULT false,
-    created_at DATE DEFAULT CURRENT_DATE
+    created_at DATE DEFAULT CURRENT_DATE,
+    acc_status BOOLEAN DEFAULT true
 );
 
 -- 2. EXPERT PROFILE TABLE
@@ -63,7 +64,8 @@ CREATE TABLE services (
     pricing_type pricing_type NOT NULL,
     delivery_days INT NOT NULL,
     tags VARCHAR(255),
-    avg_rating REAL DEFAULT 0.0
+    avg_rating REAL DEFAULT 0.0,
+    status VARCHAR(50) DEFAULT 'pending'
 );
 
 -- 5. INVITATION TABLE
