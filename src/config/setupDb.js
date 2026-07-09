@@ -166,6 +166,11 @@ async function initDatabase() {
     }
     console.log('Milestone status enum values checked/added.');
 
+    // Drop old reviews table and its custom enum type
+    console.log('Removing old reviews table and review_direction enum type if they exist...');
+    await client.query('DROP TABLE IF EXISTS reviews CASCADE;');
+    await client.query('DROP TYPE IF EXISTS review_direction CASCADE;');
+
     // Ensure rating table exists
     console.log('Ensuring rating table exists...');
     await client.query(`

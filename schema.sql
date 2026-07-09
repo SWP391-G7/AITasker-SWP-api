@@ -15,7 +15,6 @@ CREATE TYPE milestone_status AS ENUM ('pending', 'funded', 'submitted', 'release
 CREATE TYPE transaction_type AS ENUM ('escrow_deposit', 'escrow_release', 'refund');
 CREATE TYPE transaction_status AS ENUM ('pending', 'completed', 'failed');
 CREATE TYPE payment_type AS ENUM ('credit_card', 'paypal', 'vnpay', 'momo');
-CREATE TYPE review_direction AS ENUM ('client_to_expert', 'expert_to_client');
 
 -- ==========================================
 -- CREATE TABLES
@@ -187,17 +186,6 @@ CREATE TABLE payments (
     amount NUMERIC(10, 2) NOT NULL,
     type payment_type NOT NULL,
     paid_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
--- 15. REVIEW TABLE
-CREATE TABLE reviews (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    reviewer_id UUID NOT NULL REFERENCES users(id),
-    reviewee_id UUID NOT NULL REFERENCES users(id),
-    rating INT CHECK (rating >= 1 AND rating <= 5),
-    comment TEXT,
-    direction review_direction NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 -- 15b. REVIEW TABLE (New singular)

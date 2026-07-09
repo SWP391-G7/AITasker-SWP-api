@@ -32,7 +32,7 @@ async function seedDatabase() {
         milestones, 
         transactions, 
         payments, 
-        reviews, 
+        review, 
         disputes, 
         email_verification_codes 
       CASCADE;
@@ -326,11 +326,11 @@ async function seedDatabase() {
     console.log('\nSeeding Reviews...');
     
     await client.query(`
-      INSERT INTO reviews (reviewer_id, reviewee_id, rating, comment, direction)
+      INSERT INTO review (creator_id, target_id, review)
       VALUES 
-        ($1, $2, 5, 'Dr. Chen delivered outstanding work. The UNet model met all our parameters and her medical tech knowledge is stellar.', 'client_to_expert'),
-        ($2, $1, 5, 'Great experience working with HealthAI. Clear requirements and highly responsive engineers.', 'expert_to_client'),
-        ($3, $4, 5, 'David was fast, efficient, and the math agent chatbot performs flawlessly.', 'client_to_expert');
+        ($1, $2, 'Dr. Chen delivered outstanding work. The UNet model met all our parameters and her medical tech knowledge is stellar.'),
+        ($2, $1, 'Great experience working with HealthAI. Clear requirements and highly responsive engineers.'),
+        ($3, $4, 'David was fast, efficient, and the math agent chatbot performs flawlessly.');
     `, [clientIds['client2@example.com'], expertIds['expert1@example.com'], clientIds['client3@example.com'], expertIds['expert4@example.com']]);
     console.log('Reviews seeded.');
 
