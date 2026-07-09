@@ -1,4 +1,5 @@
 const { pool } = require('../config/db')
+const { sendNotification } = require('../utils/notificationService')
 
 /**
  * @desc    Create a new proposal for a job post
@@ -98,6 +99,26 @@ const createProposal = async (req, res, next) => {
     ]
 
     const result = await pool.query(insertQuery, values)
+
+    // Trigger Notification
+    try {
+      const jobInfo = await pool.query('SELECT title, client_id FROM job_posts WHERE id = $1', [job_id]);
+      const expertInfo = await pool.query('SELECT full_name FROM users WHERE id = $1', [userId]);
+      if (jobInfo.rows.length > 0) {
+        const jobTitle = jobInfo.rows[0].title;
+        const clientId = jobInfo.rows[0].client_id;
+        const expertName = expertInfo.rows[0]?.full_name || 'An expert';
+
+        await sendNotification(clientId, {
+          title: "New Proposal Received",
+          message: `Expert ${expertName} has submitted a new proposal for your job "${jobTitle}".`,
+          type: "new_proposal",
+          referenceId: result.rows[0].id
+        });
+      }
+    } catch (notifErr) {
+      console.error('[Notification Trigger Error] new_proposal:', notifErr.message);
+    }
 
     return res.status(201).json({
       success: true,
@@ -504,6 +525,38 @@ const updateProposalStatus = async (req, res, next) => {
 
     await pool.query('COMMIT');
 
+    // Trigger Notifications
+    try {
+      if (status === 'accepted') {
+        // 1. Notify Expert that their proposal was accepted
+        await sendNotification(proposal.expert_id, {
+          title: "Proposal Accepted",
+          message: `Your proposal for the job "${proposal.job_title}" has been accepted.`,
+          type: "proposal_accepted",
+          referenceId: proposal.id
+        });
+
+        // 2. Notify both Client and Expert about the new project
+        if (createdProject) {
+          await sendNotification(proposal.client_id, {
+            title: "New Project Started",
+            message: `A new project for "${proposal.job_title}" has been initiated.`,
+            type: "new_project",
+            referenceId: createdProject.id
+          });
+
+          await sendNotification(proposal.expert_id, {
+            title: "New Project Started",
+            message: `A new project for "${proposal.job_title}" has been initiated.`,
+            type: "new_project",
+            referenceId: createdProject.id
+          });
+        }
+      }
+    } catch (notifErr) {
+      console.error('[Notification Trigger Error] updateProposalStatus:', notifErr.message);
+    }
+
     return res.status(200).json({
       success: true,
       message: `Proposal status updated to ${status} successfully.`,
@@ -592,6 +645,29 @@ const counterProposal = async (req, res, next) => {
       userId,
       id
     ]);
+
+    // Trigger Notification
+    try {
+      const initiatorRes = await pool.query('SELECT full_name FROM users WHERE id = $1', [userId]);
+      const initiatorName = initiatorRes.rows[0]?.full_name || 'Someone';
+
+      const jobRes = await pool.query('SELECT title FROM job_posts WHERE id = $1', [proposal.job_id]);
+      const jobTitle = jobRes.rows[0]?.title || 'your job';
+
+      const recipientId = isClient ? proposal.expert_id : proposal.client_id;
+      const messageText = isClient 
+        ? `Client ${initiatorName} has sent a counter-proposal for "${jobTitle}"`
+        : `Expert ${initiatorName} has send a counter-proposal for "${jobTitle}"`;
+
+      await sendNotification(recipientId, {
+        title: "New Counter Proposal",
+        message: messageText,
+        type: "counter_proposal",
+        referenceId: result.rows[0].id
+      });
+    } catch (notifErr) {
+      console.error('[Notification Trigger Error] counterProposal:', notifErr.message);
+    }
 
     return res.status(200).json({
       success: true,

@@ -1,4 +1,5 @@
 const { pool } = require('../config/db');
+const { sendNotification } = require('../utils/notificationService');
 
 /**
  * @desc    Create a project from an accepted proposal
@@ -116,6 +117,24 @@ const createProject = async (req, res, next) => {
     );
 
     await pool.query('COMMIT');
+
+    // Trigger Notifications
+    try {
+      await sendNotification(project.client_id, {
+        title: "New Project Started",
+        message: `A new project for "${project.title}" has been created.`,
+        type: "new_project",
+        referenceId: project.id
+      });
+      await sendNotification(project.expert_id, {
+        title: "New Project Started",
+        message: `A new project for "${project.title}" has been created.`,
+        type: "new_project",
+        referenceId: project.id
+      });
+    } catch (notifErr) {
+      console.error('[Notification Trigger Error] createProject:', notifErr.message);
+    }
 
     return res.status(201).json({
       success: true,
@@ -289,11 +308,33 @@ const updateProject = async (req, res, next) => {
       RETURNING *;
     `;
     const result = await pool.query(updateQuery, [status, id]);
+    const updatedProject = result.rows[0];
+
+    // Trigger Notifications
+    try {
+      const normStatus = String(updatedProject.status).toLowerCase();
+      if (normStatus === 'completed') {
+        await sendNotification(updatedProject.client_id, {
+          title: "Project Completed",
+          message: `Project "${updatedProject.title}" has been marked as completed.`,
+          type: "project_finished",
+          referenceId: updatedProject.id
+        });
+        await sendNotification(updatedProject.expert_id, {
+          title: "Project Completed",
+          message: `Project "${updatedProject.title}" has been marked as completed.`,
+          type: "project_finished",
+          referenceId: updatedProject.id
+        });
+      }
+    } catch (notifErr) {
+      console.error('[Notification Trigger Error] updateProject:', notifErr.message);
+    }
 
     return res.status(200).json({
       success: true,
       message: 'Project updated successfully',
-      project: result.rows[0]
+      project: updatedProject
     });
   } catch (error) {
     return next(error);

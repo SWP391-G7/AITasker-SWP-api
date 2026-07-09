@@ -1,4 +1,5 @@
 const { pool } = require('../config/db');
+const { sendNotification } = require('../utils/notificationService');
 
 /* ─────────────────────────────────────────────────────────────────────────────
    PLAN PHASE
@@ -101,6 +102,25 @@ const submitMilestonePlan = async (req, res, next) => {
     }
 
     await pool.query('COMMIT');
+
+    // Trigger Notification
+    try {
+      const projectRes = await pool.query('SELECT client_id, title FROM projects WHERE id = $1', [projectId]);
+      if (projectRes.rows.length > 0) {
+        const { client_id: clientId, title: projectTitle } = projectRes.rows[0];
+        const expertInfo = await pool.query('SELECT full_name FROM users WHERE id = $1', [userId]);
+        const expertName = expertInfo.rows[0]?.full_name || 'Expert';
+
+        await sendNotification(clientId, {
+          title: "New Milestones Proposed",
+          message: `Expert ${expertName} has proposed a milestone plan for "${projectTitle}". Please review it.`,
+          type: "new_milestones",
+          referenceId: projectId
+        });
+      }
+    } catch (notifErr) {
+      console.error('[Notification Trigger Error] submitMilestonePlan:', notifErr.message);
+    }
 
     return res.status(201).json({
       success: true,
@@ -505,7 +525,7 @@ const submitDeliverable = async (req, res, next) => {
 
   try {
     const milestoneRes = await pool.query(
-      'SELECT m.*, p.expert_id FROM milestones m JOIN projects p ON m.project_id = p.id WHERE m.id = $1;',
+      'SELECT m.*, p.expert_id, p.client_id FROM milestones m JOIN projects p ON m.project_id = p.id WHERE m.id = $1;',
       [id]
     );
 
@@ -542,11 +562,24 @@ const submitDeliverable = async (req, res, next) => {
         id,
       ]
     );
+    const updatedMilestone = result.rows[0];
+
+    // Trigger Notification
+    try {
+      await sendNotification(milestone.client_id, {
+        title: "Milestone Deliverable Submitted",
+        message: `The expert has submitted a deliverable for milestone "${updatedMilestone.title}".`,
+        type: "milestone_submitted",
+        referenceId: updatedMilestone.id
+      });
+    } catch (notifErr) {
+      console.error('[Notification Trigger Error] submitDeliverable:', notifErr.message);
+    }
 
     return res.status(200).json({
       success: true,
       message: 'Deliverable submitted for client review',
-      milestone: result.rows[0],
+      milestone: updatedMilestone,
     });
   } catch (error) {
     return next(error);
@@ -618,7 +651,7 @@ const requestRevision = async (req, res, next) => {
 
   try {
     const milestoneRes = await pool.query(
-      'SELECT m.*, p.client_id FROM milestones m JOIN projects p ON m.project_id = p.id WHERE m.id = $1;',
+      'SELECT m.*, p.client_id, p.expert_id FROM milestones m JOIN projects p ON m.project_id = p.id WHERE m.id = $1;',
       [id]
     );
 
@@ -646,11 +679,24 @@ const requestRevision = async (req, res, next) => {
       "UPDATE milestones SET status = 'revision_requested', change_request_note = $1 WHERE id = $2 RETURNING *;",
       [note ? String(note).trim() : null, id]
     );
+    const updatedMilestone = result.rows[0];
+
+    // Trigger Notification
+    try {
+      await sendNotification(milestone.expert_id, {
+        title: "Milestone Revision Requested",
+        message: `The client requested a revision on milestone "${updatedMilestone.title}". Note: "${note || ''}"`,
+        type: "milestone_rejected",
+        referenceId: updatedMilestone.id
+      });
+    } catch (notifErr) {
+      console.error('[Notification Trigger Error] requestRevision:', notifErr.message);
+    }
 
     return res.status(200).json({
       success: true,
       message: 'Revision requested',
-      milestone: result.rows[0],
+      milestone: updatedMilestone,
     });
   } catch (error) {
     return next(error);
@@ -736,6 +782,33 @@ const payMilestone = async (req, res, next) => {
 
     await pool.query('COMMIT');
 
+    // Trigger Notifications
+    try {
+      if (allFinished) {
+        await sendNotification(milestone.client_id, {
+          title: "All Milestones Completed",
+          message: `Congratulations! All milestones for the project have been completed.`,
+          type: "milestones_finished",
+          referenceId: milestone.project_id
+        });
+        await sendNotification(milestone.expert_id, {
+          title: "All Milestones Completed",
+          message: `Congratulations! All milestones for the project have been completed.`,
+          type: "milestones_finished",
+          referenceId: milestone.project_id
+        });
+      } else {
+        await sendNotification(milestone.expert_id, {
+          title: "Milestone Payment Released",
+          message: `The client has released the payment for milestone "${updatedMilestone.title}".`,
+          type: "milestone_approved",
+          referenceId: updatedMilestone.id
+        });
+      }
+    } catch (notifErr) {
+      console.error('[Notification Trigger Error] payMilestone:', notifErr.message);
+    }
+
     return res.status(200).json({
       success: true,
       message: 'Payment processed successfully',
@@ -794,11 +867,30 @@ const approveMilestone = async (req, res, next) => {
       `UPDATE milestones SET status = $1 WHERE id = $2 RETURNING *;`,
       [targetStatus, id]
     );
+    const updatedMilestone = result.rows[0];
+
+    // Trigger Notification
+    try {
+      const type = targetStatus === 'Approved' ? 'milestones_accepted' : 'milestone_approved';
+      const titleText = targetStatus === 'Approved' ? 'Milestone Plan Approved' : 'Milestone Work Approved';
+      const messageText = targetStatus === 'Approved'
+        ? `The client has accepted your milestone plan for "${updatedMilestone.title}".`
+        : `The client has approved your submission for milestone "${updatedMilestone.title}".`;
+
+      await sendNotification(milestone.expert_id, {
+        title: titleText,
+        message: messageText,
+        type: type,
+        referenceId: updatedMilestone.id
+      });
+    } catch (notifErr) {
+      console.error('[Notification Trigger Error] approveMilestone:', notifErr.message);
+    }
 
     return res.status(200).json({
       success: true,
       message: `Milestone approved. Status set to ${targetStatus}`,
-      milestone: result.rows[0]
+      milestone: updatedMilestone
     });
   } catch (error) {
     return next(error);
@@ -817,7 +909,7 @@ const declineMilestone = async (req, res, next) => {
 
   try {
     const milestoneRes = await pool.query(
-      `SELECT m.*, p.client_id 
+      `SELECT m.*, p.client_id, p.expert_id 
        FROM milestones m JOIN projects p ON m.project_id = p.id WHERE m.id = $1;`,
       [id]
     );
@@ -836,15 +928,29 @@ const declineMilestone = async (req, res, next) => {
       return next(err);
     }
 
+    // Pass the correct parameters (using $1 for status and $2 for id)
     const result = await pool.query(
-      `UPDATE milestones SET status = 'Declined' WHERE id = $2 RETURNING *;`,
+      `UPDATE milestones SET status = 'Declined' WHERE id = $1 RETURNING *;`,
       [id]
     );
+    const updatedMilestone = result.rows[0];
+
+    // Trigger Notification
+    try {
+      await sendNotification(milestone.expert_id, {
+        title: "Milestone Plan Declined",
+        message: `The client has declined your milestone "${updatedMilestone.title}".`,
+        type: "milestone_rejected",
+        referenceId: updatedMilestone.id
+      });
+    } catch (notifErr) {
+      console.error('[Notification Trigger Error] declineMilestone:', notifErr.message);
+    }
 
     return res.status(200).json({
       success: true,
       message: 'Milestone declined successfully',
-      milestone: result.rows[0]
+      milestone: updatedMilestone
     });
   } catch (error) {
     return next(error);
@@ -923,7 +1029,7 @@ const submitMilestoneContent = async (req, res, next) => {
 
   try {
     const milestoneRes = await pool.query(
-      `SELECT m.*, p.expert_id, p.status AS project_status 
+      `SELECT m.*, p.expert_id, p.client_id, p.status AS project_status 
        FROM milestones m JOIN projects p ON m.project_id = p.id WHERE m.id = $1;`,
       [id]
     );
@@ -952,11 +1058,24 @@ const submitMilestoneContent = async (req, res, next) => {
       `UPDATE milestones SET content = $1, status = 'Pending', response = NULL WHERE id = $2 RETURNING *;`,
       [String(content).trim(), id]
     );
+    const updatedMilestone = result.rows[0];
+
+    // Trigger Notification
+    try {
+      await sendNotification(milestone.client_id, {
+        title: "Milestone Content Proposed",
+        message: `The expert has submitted content for milestone "${updatedMilestone.title}".`,
+        type: "milestone_submitted",
+        referenceId: updatedMilestone.id
+      });
+    } catch (notifErr) {
+      console.error('[Notification Trigger Error] submitMilestoneContent:', notifErr.message);
+    }
 
     return res.status(200).json({
       success: true,
       message: 'Content submitted successfully for client review',
-      milestone: result.rows[0]
+      milestone: updatedMilestone
     });
   } catch (error) {
     return next(error);

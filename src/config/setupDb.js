@@ -58,6 +58,65 @@ async function initDatabase() {
     await client.query('ALTER TABLE conversations ADD COLUMN IF NOT EXISTS target_id UUID REFERENCES users(id) ON DELETE CASCADE;');
     console.log('Conversations table checked/migrated successfully.');
 
+    // Ensure rating column exists in services table
+    console.log('Ensuring services table has "rating" column...');
+    await client.query(`
+      ALTER TABLE services ADD COLUMN IF NOT EXISTS rating UUID REFERENCES rating(id) ON DELETE SET NULL DEFAULT NULL;
+    `);
+    console.log('Rating & Review tables and attributes checked/added successfully.');
+
+    // Ensure notification_type enum exists
+    console.log('Ensuring notification_type enum exists...');
+    try {
+      await client.query(`
+        DO $$
+        BEGIN
+          IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'notification_type') THEN
+            CREATE TYPE notification_type AS ENUM (
+              'new_proposal', 
+              'counter_proposal', 
+              'proposal_accepted', 
+              'new_milestones', 
+              'milestones_accepted', 
+              'milestone_rejected', 
+              'milestone_submitted', 
+              'milestone_approved', 
+              'milestones_finished', 
+              'new_project', 
+              'project_finished'
+            );
+          END IF;
+        END
+        $$;
+      `);
+      console.log('notification_type enum checked/created successfully.');
+    } catch (err) {
+      console.warn('Non-fatal warning creating notification_type enum:', err.message);
+    }
+
+    // Ensure notifications table exists
+    console.log('Ensuring notifications table exists...');
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS notifications (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        title VARCHAR(255) NOT NULL,
+        message TEXT NOT NULL,
+        type notification_type NOT NULL,
+        reference_id UUID,
+        is_read BOOLEAN DEFAULT false,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+    console.log('notifications table checked/created successfully.');
+
+    // Ensure search index exists
+    console.log('Ensuring notifications index exists...');
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_notifications_user_unread ON notifications(user_id, is_read);
+    `);
+    console.log('notifications index checked/created successfully.');
+
     // Ensure client_profiles and expert_profiles have the new onboarding columns
     console.log('Ensuring client_profiles and expert_profiles have onboarding columns...');
     await client.query('ALTER TABLE client_profiles ADD COLUMN IF NOT EXISTS company_name VARCHAR(255);');
