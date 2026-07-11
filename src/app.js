@@ -24,7 +24,7 @@ const app = express()
 // Set up middlewares
 app.use(cors({
   origin: '*', // Allow React frontend from any origin for ease of development; restrict in production
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
 }))
 

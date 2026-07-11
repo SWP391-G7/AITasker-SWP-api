@@ -18,6 +18,7 @@ const {
   submitMilestoneResponse,
   submitMilestoneContent,
   startProject,
+  getMilestoneById,
 } = require('../controllers/milestoneController');
 
 // All milestone routes require authentication
@@ -31,6 +32,7 @@ router.put( '/project/:projectId/request-changes', requestPlanChanges);
 router.put( '/project/:projectId/start',        startProject);
 
 // ── Milestone-level routes ───────────────────────────────────────────────────
+router.get('/:id',                     getMilestoneById);
 router.put('/:id/start',               startMilestone);
 router.put('/:id/submit-deliverable',   submitDeliverable);
 router.put('/:id/approve-deliverable',  approveDeliverable);
@@ -44,3 +46,4 @@ router.put('/:id',                      updateMilestone);
 router.delete('/:id',                   deleteMilestone);
 
 module.exports = router;
+

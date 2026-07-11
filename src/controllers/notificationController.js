@@ -6,6 +6,14 @@ const { query } = require('../config/db');
 async function getNotifications(req, res, next) {
   try {
     const userId = req.user.id;
+
+    // Auto-delete already-read notifications from DB on page load
+    const deleteSql = `
+      DELETE FROM notifications 
+      WHERE user_id = $1 AND is_read = true;
+    `;
+    await query(deleteSql, [userId]);
+
     const sql = `
       SELECT * FROM notifications 
       WHERE user_id = $1 
