@@ -58,11 +58,28 @@ async function initDatabase() {
     await client.query('ALTER TABLE conversations ADD COLUMN IF NOT EXISTS target_id UUID REFERENCES users(id) ON DELETE CASCADE;');
     console.log('Conversations table checked/migrated successfully.');
 
+    // Ensure rating table exists
+    console.log('Ensuring rating table exists...');
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS rating (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        rate_sum INT DEFAULT 0,
+        count INT DEFAULT 0
+      );
+    `);
+
+    // Ensure rating column exists in users table
+    console.log('Ensuring users table has "rating" column...');
+    await client.query(`
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS rating UUID REFERENCES rating(id) ON DELETE SET NULL DEFAULT NULL;
+    `);
+
     // Ensure rating column exists in services table
     console.log('Ensuring services table has "rating" column...');
     await client.query(`
       ALTER TABLE services ADD COLUMN IF NOT EXISTS rating UUID REFERENCES rating(id) ON DELETE SET NULL DEFAULT NULL;
     `);
+
     console.log('Rating & Review tables and attributes checked/added successfully.');
 
     // Ensure notification_type enum exists
@@ -225,7 +242,29 @@ async function initDatabase() {
     }
     console.log('Milestone status enum values checked/added.');
 
+    // Ensure invitations table has columns for the service request flow
+    console.log('Ensuring invitations table has service request columns...');
+    await client.query('ALTER TABLE invitations ADD COLUMN IF NOT EXISTS cover_letter TEXT;');
+    await client.query('ALTER TABLE invitations ADD COLUMN IF NOT EXISTS bid_amount NUMERIC(10, 2);');
+    await client.query('ALTER TABLE invitations ADD COLUMN IF NOT EXISTS delivery_days INT;');
+    await client.query('ALTER TABLE invitations ADD COLUMN IF NOT EXISTS status proposal_status DEFAULT \'pending\';');
+    await client.query('ALTER TABLE invitations ADD COLUMN IF NOT EXISTS counter_bid_amount NUMERIC(10, 2);');
+    await client.query('ALTER TABLE invitations ADD COLUMN IF NOT EXISTS counter_delivery_days INTEGER;');
+    await client.query('ALTER TABLE invitations ADD COLUMN IF NOT EXISTS counter_cover_letter TEXT;');
+    await client.query('ALTER TABLE invitations ADD COLUMN IF NOT EXISTS counter_initiated_by UUID;');
+    console.log('Invitations table columns checked/added successfully.');
 
+    // Add new notification types to notification_type enum if they don't exist
+    const newNotifTypes = ['new_service_request', 'counter_service_request', 'service_request_accepted'];
+    for (const val of newNotifTypes) {
+      try {
+        await client.query(`ALTER TYPE notification_type ADD VALUE '${val}';`);
+      } catch (err) {
+        if (err.code !== '42710') {
+          console.warn(`Non-fatal warning adding ${val} to notification_type enum:`, err.message);
+        }
+      }
+    }
 
   } catch (err) {
     console.error('Error during database initialization:', err);

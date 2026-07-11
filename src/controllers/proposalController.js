@@ -466,6 +466,24 @@ const updateProposalStatus = async (req, res, next) => {
       return next(err);
     }
 
+    // 1.5 Check if another proposal has already been accepted or if the job is closed/filled
+    if (status === 'accepted') {
+      const acceptedCheck = await pool.query(
+        "SELECT id FROM proposals WHERE job_id = $1 AND status = 'accepted' AND id <> $2",
+        [proposal.job_id, id]
+      );
+      if (acceptedCheck.rows.length > 0) {
+        const err = new Error('Cannot accept proposal: Another proposal has already been accepted for this job.');
+        err.statusCode = 400;
+        return next(err);
+      }
+      if (proposal.job_status === 'closed') {
+        const err = new Error('Cannot accept proposal: The job post is already closed/filled.');
+        err.statusCode = 400;
+        return next(err);
+      }
+    }
+
     // 2. Start transaction
     await pool.query('BEGIN');
 

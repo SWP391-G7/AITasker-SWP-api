@@ -17,6 +17,7 @@ const milestoneRoutes = require('./routes/milestoneRoutes')
 const ratingRoutes = require('./routes/ratingRoutes')
 const reviewRoutes = require('./routes/reviewRoutes')
 const notificationRoutes = require('./routes/notificationRoutes')
+const invitationRoutes = require('./routes/invitationRoutes')
 
 const app = express()
 
@@ -56,6 +57,7 @@ app.use('/api/milestones', milestoneRoutes)
 app.use('/api/ratings', ratingRoutes)
 app.use('/api/reviews', reviewRoutes)
 app.use('/api/notifications', notificationRoutes)
+app.use('/api/invitations', invitationRoutes)
 
 // Handle 404 Route Not Found
 app.use((req, res, next) => {
