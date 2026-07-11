@@ -15,11 +15,17 @@ CREATE TYPE milestone_status AS ENUM ('pending', 'funded', 'submitted', 'release
 CREATE TYPE transaction_type AS ENUM ('escrow_deposit', 'escrow_release', 'refund');
 CREATE TYPE transaction_status AS ENUM ('pending', 'completed', 'failed');
 CREATE TYPE payment_type AS ENUM ('credit_card', 'paypal', 'vnpay', 'momo');
-CREATE TYPE review_direction AS ENUM ('client_to_expert', 'expert_to_client');
 
 -- ==========================================
 -- CREATE TABLES
 -- ==========================================
+
+-- 0. RATING TABLE
+CREATE TABLE rating (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    rate_sum INT DEFAULT 0,
+    count INT DEFAULT 0
+);
 
 -- 1. USER TABLE
 CREATE TABLE users (
@@ -29,7 +35,8 @@ CREATE TABLE users (
     email VARCHAR(255) UNIQUE NOT NULL,
     role user_role NOT NULL,
     is_verified BOOLEAN DEFAULT false,
-    created_at DATE DEFAULT CURRENT_DATE
+    created_at DATE DEFAULT CURRENT_DATE,
+    rating UUID REFERENCES rating(id) ON DELETE SET NULL DEFAULT NULL
 );
 
 -- 2. EXPERT PROFILE TABLE
@@ -63,7 +70,8 @@ CREATE TABLE services (
     pricing_type pricing_type NOT NULL,
     delivery_days INT NOT NULL,
     tags VARCHAR(255),
-    avg_rating REAL DEFAULT 0.0
+    avg_rating REAL DEFAULT 0.0,
+    rating UUID REFERENCES rating(id) ON DELETE SET NULL DEFAULT NULL
 );
 
 -- 5. INVITATION TABLE
@@ -180,14 +188,12 @@ CREATE TABLE payments (
     paid_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- 15. REVIEW TABLE
-CREATE TABLE reviews (
+-- 15b. REVIEW TABLE (New singular)
+CREATE TABLE review (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    reviewer_id UUID NOT NULL REFERENCES users(id),
-    reviewee_id UUID NOT NULL REFERENCES users(id),
-    rating INT CHECK (rating >= 1 AND rating <= 5),
-    comment TEXT,
-    direction review_direction NOT NULL,
+    creator_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    target_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    review TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 

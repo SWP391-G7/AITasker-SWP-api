@@ -265,6 +265,45 @@ async function initDatabase() {
         }
       }
     }
+    // Drop old reviews table and its custom enum type
+    console.log('Removing old reviews table and review_direction enum type if they exist...');
+    await client.query('DROP TABLE IF EXISTS reviews CASCADE;');
+    await client.query('DROP TYPE IF EXISTS review_direction CASCADE;');
+
+    // Ensure rating table exists
+    console.log('Ensuring rating table exists...');
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS rating (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        rate_sum INT DEFAULT 0,
+        count INT DEFAULT 0
+      );
+    `);
+
+    // Ensure review table exists (singular)
+    console.log('Ensuring review table exists...');
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS review (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        creator_id UUID REFERENCES users(id) ON DELETE CASCADE,
+        target_id UUID REFERENCES users(id) ON DELETE CASCADE,
+        review TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
+    // Ensure rating column exists in users table
+    console.log('Ensuring users table has "rating" column...');
+    await client.query(`
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS rating UUID REFERENCES rating(id) ON DELETE SET NULL DEFAULT NULL;
+    `);
+
+    // Ensure rating column exists in services table
+    console.log('Ensuring services table has "rating" column...');
+    await client.query(`
+      ALTER TABLE services ADD COLUMN IF NOT EXISTS rating UUID REFERENCES rating(id) ON DELETE SET NULL DEFAULT NULL;
+    `);
+    console.log('Rating & Review tables and attributes checked/added successfully.');
 
   } catch (err) {
     console.error('Error during database initialization:', err);
