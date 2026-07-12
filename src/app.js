@@ -4,6 +4,7 @@ const swaggerDocument = require('./swagger.json')
 const cors = require('cors')
 const { errorHandler } = require('./middleware/errorMiddleware')
 const authRoutes = require('./routes/authRoutes')
+const aiRoutes = require('./routes/aiRoutes')
 const profileRoutes = require('./routes/profileRoutes')
 const jobRoutes = require('./routes/jobRoutes')
 const searchRoutes = require('./routes/searchRoutes')
@@ -45,6 +46,7 @@ app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerDocument)) // Swagg
 
 // Mount modular routes
 app.use('/api/auth', authRoutes)
+app.use('/api/ai', aiRoutes)
 app.use('/api/profile', profileRoutes)
 app.use('/api/jobs', jobRoutes)
 app.use('/api/search', searchRoutes)
