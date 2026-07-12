@@ -36,7 +36,9 @@ const searchEntities = async (req, res, next) => {
     hourlyRateMin,
     hourlyRateMax,
     industry,
-    companyName
+    companyName,
+    ratingMin,
+    ratingMax
   } = req.query;
 
   let queryText = '';
@@ -124,9 +126,22 @@ const searchEntities = async (req, res, next) => {
         addFilter('s.pricing_type =', pricingType.trim());
       }
 
+      if (req.query.tags && req.query.tags.trim() !== '') {
+        addFilter('s.tags ILIKE', `%${req.query.tags.trim()}%`);
+      }
+
+      if (ratingMin !== undefined && ratingMin !== null && ratingMin !== '') {
+        const parsedMin = parseFloat(ratingMin);
+        if (!isNaN(parsedMin)) {
+          addFilter('s.avg_rating >=', parsedMin);
+        }
+      }
+
     } else if (target === 'expert') {
       queryText = `
-        SELECT e.*, u.full_name, u.email
+        SELECT e.*, u.full_name, u.email,
+          (SELECT COUNT(*) FROM projects WHERE expert_id = e.id AND status = 'completed') AS completed_projects,
+          (SELECT COUNT(*) FROM projects WHERE expert_id = e.id) AS total_projects
         FROM expert_profiles e
         INNER JOIN users u ON e.id = u.id
         WHERE u.role = 'expert'
@@ -165,7 +180,8 @@ const searchEntities = async (req, res, next) => {
 
     } else if (target === 'client') {
       queryText = `
-        SELECT c.*, u.full_name, u.email
+        SELECT c.*, u.full_name, u.email,
+          (SELECT COUNT(*) FROM job_posts WHERE client_id = c.id) AS posted_jobs_count
         FROM client_profiles c
         INNER JOIN users u ON c.id = u.id
         WHERE u.role = 'client'

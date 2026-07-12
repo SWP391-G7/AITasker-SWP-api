@@ -196,6 +196,18 @@ async function initDatabase() {
     await client.query('ALTER TABLE projects ADD COLUMN IF NOT EXISTS description TEXT;');
     console.log('Projects table columns checked/added successfully.');
 
+    // Add requirements column to job_posts
+    console.log('Ensuring job_posts has requirements column...');
+    await client.query('ALTER TABLE job_posts ADD COLUMN IF NOT EXISTS requirements TEXT;');
+    console.log('Requirements column checked/added successfully.');
+
+    // Add tags, images and video_link columns to job_posts
+    console.log('Ensuring job_posts has tags and media columns...');
+    await client.query('ALTER TABLE job_posts ADD COLUMN IF NOT EXISTS tags TEXT;');
+    await client.query('ALTER TABLE job_posts ADD COLUMN IF NOT EXISTS images TEXT;');
+    await client.query('ALTER TABLE job_posts ADD COLUMN IF NOT EXISTS video_link VARCHAR(255);');
+    console.log('Tags and media columns checked/added successfully.');
+
     // Remove deprecated deadline column from job_posts (replaced by duration_days)
     console.log('Removing deprecated deadline column from job_posts if present...');
     await client.query('ALTER TABLE job_posts DROP COLUMN IF EXISTS deadline;');
@@ -302,6 +314,15 @@ async function initDatabase() {
     console.log('Ensuring services table has "rating" column...');
     await client.query(`
       ALTER TABLE services ADD COLUMN IF NOT EXISTS rating UUID REFERENCES rating(id) ON DELETE SET NULL DEFAULT NULL;
+    `);
+
+    // Ensure images and video_link columns exist in services table
+    console.log('Ensuring services table has "images" and "video_link" columns...');
+    await client.query(`
+      ALTER TABLE services ADD COLUMN IF NOT EXISTS images TEXT;
+    `);
+    await client.query(`
+      ALTER TABLE services ADD COLUMN IF NOT EXISTS video_link VARCHAR(255);
     `);
     console.log('Rating & Review tables and attributes checked/added successfully.');
 
