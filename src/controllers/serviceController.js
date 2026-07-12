@@ -22,7 +22,9 @@ const createService = async (req, res, next) => {
     price,
     pricing_type,
     delivery_days,
-    tags
+    tags,
+    images,
+    videoLink
   } = req.body
 
   // 2. Input Validation
@@ -67,6 +69,14 @@ const createService = async (req, res, next) => {
     errors.tags = 'Tags cannot exceed 255 characters'
   }
 
+  if (images !== undefined && typeof images !== 'string') {
+    errors.images = 'Images must be a JSON string'
+  }
+
+  if (videoLink !== undefined && typeof videoLink !== 'string') {
+    errors.video_link = 'Video link must be a string'
+  }
+
   if (Object.keys(errors).length > 0) {
     const err = new Error('Validation failed')
     err.statusCode = 400
@@ -90,9 +100,13 @@ const createService = async (req, res, next) => {
         price,
         pricing_type,
         delivery_days,
-        tags
+        tags,
+        images,
+        video_link,
+        status
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9,
+      'approved') 
       RETURNING *;
     `
 
@@ -103,7 +117,9 @@ const createService = async (req, res, next) => {
       parsedPrice,
       pricing_type,
       parsedDeliveryDays,
-      tags ? tags.trim() : null
+      tags ? tags.trim() : null,
+      images || null,
+      videoLink || null
     ]
 
     const result = await pool.query(insertQuery, values)
@@ -186,7 +202,7 @@ const getServiceById = async (req, res, next) => {
 const updateService = async (req, res, next) => {
   const { id } = req.params
   const userId = req.user.id
-  const { title, description, price, pricing_type, delivery_days, tags } = req.body
+  const { title, description, price, pricing_type, delivery_days, tags, images, videoLink } = req.body
 
   try {
     // Check if service exists and belongs to current user
@@ -250,6 +266,14 @@ const updateService = async (req, res, next) => {
       errors.tags = 'Tags cannot exceed 255 characters'
     }
 
+    if (images !== undefined && typeof images !== 'string') {
+      errors.images = 'Images must be a JSON string'
+    }
+
+    if (videoLink !== undefined && typeof videoLink !== 'string') {
+      errors.video_link = 'Video link must be a string'
+    }
+
     if (Object.keys(errors).length > 0) {
       const err = new Error('Validation failed')
       err.statusCode = 400
@@ -295,6 +319,18 @@ const updateService = async (req, res, next) => {
     if (tags !== undefined) {
       updates.push(`tags = $${paramCount}`)
       values.push(tags ? tags.trim() : null)
+      paramCount++
+    }
+
+    if (images !== undefined) {
+      updates.push(`images = $${paramCount}`)
+      values.push(images)
+      paramCount++
+    }
+
+    if (videoLink !== undefined) {
+      updates.push(`video_link = $${paramCount}`)
+      values.push(videoLink)
       paramCount++
     }
 
