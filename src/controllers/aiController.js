@@ -175,15 +175,61 @@ const generateFormFields = async (req, res, next) => {
       return next(err);
     }
 
-    // Try parsing generated text to verify valid JSON
+    // Try parsing generated text to verify valid JSON with robust cleaning fallback
     let parsedJson;
+    let cleanText = outputText.trim();
+
+    // 1. Strip markdown code block wrappers if present
+    if (cleanText.startsWith("```")) {
+      const firstNewline = cleanText.indexOf("\n");
+      if (firstNewline !== -1) {
+        cleanText = cleanText.substring(firstNewline + 1);
+      }
+      if (cleanText.endsWith("```")) {
+        cleanText = cleanText.substring(0, cleanText.length - 3).trim();
+      }
+    }
+
+    // 2. Attempt parsing with recovery strategies
     try {
-      parsedJson = JSON.parse(outputText.trim());
+      parsedJson = JSON.parse(cleanText);
     } catch (parseError) {
-      console.error('Failed to parse Gemini JSON output:', outputText);
-      const err = new Error('AI Core busy');
-      err.statusCode = 500;
-      return next(err);
+      let success = false;
+      const firstBrace = cleanText.indexOf("{");
+      const lastBrace = cleanText.lastIndexOf("}");
+
+      if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+        let tempText = cleanText.substring(firstBrace, lastBrace + 1);
+        try {
+          parsedJson = JSON.parse(tempText);
+          success = true;
+        } catch (innerErr) {
+          // If that fails, try recursively stripping trailing braces or characters
+          while (tempText.endsWith("}") && tempText.length > 2) {
+            tempText = tempText.slice(0, -1).trim();
+            const nextLastBrace = tempText.lastIndexOf("}");
+            if (nextLastBrace !== -1) {
+              tempText = tempText.substring(0, nextLastBrace + 1);
+              try {
+                parsedJson = JSON.parse(tempText);
+                success = true;
+                break;
+              } catch (retryErr) {
+                // Continue stripping from the end
+              }
+            } else {
+              break;
+            }
+          }
+        }
+      }
+
+      if (!success) {
+        console.error("Failed to parse Gemini JSON output after all recovery attempts. Original:", outputText);
+        const err = new Error("AI Core busy");
+        err.statusCode = 500;
+        return next(err);
+      }
     }
 
     // 3. Write record into database logs (ai_logs table)

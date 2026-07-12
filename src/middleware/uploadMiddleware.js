@@ -3,17 +3,19 @@ const multer = require('multer');
 const storage = multer.memoryStorage();
 
 const fileFilter = (req, file, cb) => {
-  if (file.mimetype.startsWith('image/')) {
-    cb(null, true);
+  // Prevent upload of potentially malicious executable scripts/binaries
+  const forbiddenExtensions = /\.(exe|bat|msi|cmd|sh|lnk|sys)$/i;
+  if (forbiddenExtensions.test(file.originalname)) {
+    cb(new Error('Executable and system files are not allowed'), false);
   } else {
-    cb(new Error('Only image files are allowed'), false);
+    cb(null, true);
   }
 };
 
 const upload = multer({
   storage,
   fileFilter,
-  limits: { fileSize: 5 * 1024 * 1024 },
+  limits: { fileSize: 50 * 1024 * 1024 }, // 50 MB limit as requested
 });
 
 module.exports = upload;
