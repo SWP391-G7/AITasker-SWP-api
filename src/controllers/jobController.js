@@ -19,10 +19,14 @@ const createJobPost = async (req, res, next) => {
   const {
     title,
     description,
+    requirements,
     budgetMin,
     budgetMax,
     requiredSkill,
-    durationDays
+    tags,
+    durationDays,
+    images,
+    videoLink
   } = req.body
 
   // 2. Input Validation
@@ -36,6 +40,10 @@ const createJobPost = async (req, res, next) => {
 
   if (description && typeof description !== 'string') {
     errors.description = 'Description must be a string'
+  }
+
+  if (requirements && typeof requirements !== 'string') {
+    errors.requirements = 'Requirements must be a string'
   }
 
   let parsedBudgetMin = null
@@ -70,7 +78,17 @@ const createJobPost = async (req, res, next) => {
     errors.requiredSkill = 'Required skill cannot exceed 255 characters'
   }
 
+  if (tags && tags.length > 500) {
+    errors.tags = 'Tags cannot exceed 500 characters'
+  }
 
+  if (images && typeof images !== 'string') {
+    errors.images = 'Images must be a JSON string'
+  }
+
+  if (videoLink && typeof videoLink !== 'string') {
+    errors.videoLink = 'Video link must be a string'
+  }
 
   if (Object.keys(errors).length > 0) {
     const err = new Error('Validation failed')
@@ -92,12 +110,16 @@ const createJobPost = async (req, res, next) => {
         client_id,
         title,
         description,
+        requirements,
         budget_min,
         budget_max,
         required_skill,
+        tags,
+        images,
+        video_link,
         duration_days
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
       RETURNING *;
     `
 
@@ -105,9 +127,13 @@ const createJobPost = async (req, res, next) => {
       userId,
       title.trim(),
       description ? description.trim() : null,
+      requirements ? requirements.trim() : null,
       parsedBudgetMin,
       parsedBudgetMax,
       requiredSkill ? requiredSkill.trim() : null,
+      tags || null,
+      images || null,
+      videoLink || null,
       parsedDurationDays
     ]
 
@@ -197,7 +223,7 @@ const getJobById = async (req, res, next) => {
 const updateJobPost = async (req, res, next) => {
   const { id } = req.params
   const userId = req.user.id
-  const { title, description, budgetMin, budgetMax, requiredSkill, durationDays } = req.body
+  const { title, description, requirements, budgetMin, budgetMax, requiredSkill, tags, durationDays, images, videoLink } = req.body
 
   try {
     // Check if job exists and belongs to current user
@@ -212,6 +238,75 @@ const updateJobPost = async (req, res, next) => {
     if (jobCheck.rows[0].client_id !== userId) {
       const err = new Error('Forbidden: You can only update your own job posts')
       err.statusCode = 403
+      return next(err)
+    }
+
+    // Validate fields before updating
+    const errors = {}
+
+    if (title !== undefined && (!title || typeof title !== 'string' || title.trim() === '')) {
+      errors.title = 'Job title is required'
+    } else if (title !== undefined && title.length > 255) {
+      errors.title = 'Job title cannot exceed 255 characters'
+    }
+
+    if (description !== undefined && typeof description !== 'string') {
+      errors.description = 'Description must be a string'
+    }
+
+    if (requirements !== undefined && typeof requirements !== 'string') {
+      errors.requirements = 'Requirements must be a string'
+    }
+
+    if (budgetMin !== undefined) {
+      const parsedMin = parseFloat(budgetMin)
+      if (isNaN(parsedMin) || parsedMin < 0) {
+        errors.budgetMin = 'Minimum budget must be a non-negative number'
+      }
+    }
+
+    if (budgetMax !== undefined) {
+      const parsedMax = parseFloat(budgetMax)
+      if (isNaN(parsedMax) || parsedMax < 0) {
+        errors.budgetMax = 'Maximum budget must be a non-negative number'
+      }
+    }
+
+    if (budgetMin !== undefined && budgetMax !== undefined) {
+      const parsedMin = parseFloat(budgetMin)
+      const parsedMax = parseFloat(budgetMax)
+      if (!isNaN(parsedMin) && !isNaN(parsedMax) && parsedMax < parsedMin) {
+        errors.budgetMax = 'Maximum budget cannot be less than minimum budget'
+      }
+    }
+
+    if (durationDays !== undefined) {
+      const parsedDur = parseInt(durationDays, 10)
+      if (isNaN(parsedDur) || parsedDur <= 0) {
+        errors.durationDays = 'Duration must be a positive number of days'
+      }
+    }
+
+    if (requiredSkill !== undefined && requiredSkill.length > 255) {
+      errors.requiredSkill = 'Required skill cannot exceed 255 characters'
+    }
+
+    if (tags !== undefined && tags.length > 500) {
+      errors.tags = 'Tags cannot exceed 500 characters'
+    }
+
+    if (images !== undefined && typeof images !== 'string') {
+      errors.images = 'Images must be a JSON string'
+    }
+
+    if (videoLink !== undefined && typeof videoLink !== 'string') {
+      errors.videoLink = 'Video link must be a string'
+    }
+
+    if (Object.keys(errors).length > 0) {
+      const err = new Error('Validation failed')
+      err.statusCode = 400
+      err.errors = errors
       return next(err)
     }
 
@@ -232,6 +327,12 @@ const updateJobPost = async (req, res, next) => {
       paramCount++
     }
 
+    if (requirements !== undefined) {
+      updates.push(`requirements = $${paramCount}`)
+      values.push(requirements)
+      paramCount++
+    }
+
     if (budgetMin !== undefined) {
       updates.push(`budget_min = $${paramCount}`)
       values.push(budgetMin)
@@ -247,6 +348,24 @@ const updateJobPost = async (req, res, next) => {
     if (requiredSkill !== undefined) {
       updates.push(`required_skill = $${paramCount}`)
       values.push(requiredSkill)
+      paramCount++
+    }
+
+    if (tags !== undefined) {
+      updates.push(`tags = $${paramCount}`)
+      values.push(tags)
+      paramCount++
+    }
+
+    if (images !== undefined) {
+      updates.push(`images = $${paramCount}`)
+      values.push(images)
+      paramCount++
+    }
+
+    if (videoLink !== undefined) {
+      updates.push(`video_link = $${paramCount}`)
+      values.push(videoLink)
       paramCount++
     }
 
