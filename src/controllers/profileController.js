@@ -26,6 +26,21 @@ const getUserProfile = async (req, res, next) => {
 
     const user = userRes.rows[0];
 
+    // Project/service counts
+    const projectCountRes = await pool.query(
+      `SELECT COUNT(*) FILTER (WHERE status = 'completed') AS completed,
+              COUNT(*) AS total
+       FROM projects WHERE expert_id = $1`,
+      [userId]
+    );
+    const expertProjectCounts = projectCountRes.rows[0] || { completed: 0, total: 0 };
+
+    const jobCountRes = await pool.query(
+      `SELECT COUNT(*) FROM job_posts WHERE client_id = $1`,
+      [userId]
+    );
+    const postedJobsCount = parseInt(jobCountRes.rows[0]?.count || 0, 10);
+
     // 2. Fetch Client Profile if exists
     const clientQuery = `SELECT * FROM client_profiles WHERE id = $1`;
     const clientRes = await pool.query(clientQuery, [userId]);
@@ -83,6 +98,9 @@ const getUserProfile = async (req, res, next) => {
       } : null,
       hasClientProfile,
       hasExpertProfile,
+      completedProjects: parseInt(expertProjectCounts.completed || 0, 10),
+      totalProjects: parseInt(expertProjectCounts.total || 0, 10),
+      postedJobsCount,
       services: services.map(s => ({
         id: s.id,
         title: s.title,

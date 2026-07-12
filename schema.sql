@@ -88,9 +88,13 @@ CREATE TABLE job_posts (
     client_id UUID NOT NULL REFERENCES client_profiles(id) ON DELETE CASCADE,
     title VARCHAR(255) NOT NULL,
     description TEXT,
+    requirements TEXT,
     budget_min NUMERIC(10, 2),
     budget_max NUMERIC(10, 2),
     required_skill VARCHAR(255),
+    tags TEXT,
+    images TEXT,
+    video_link VARCHAR(255),
     duration_days INT,
     status job_status DEFAULT 'open',
     deadline TIMESTAMP
