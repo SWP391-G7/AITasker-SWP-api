@@ -296,8 +296,54 @@ const updatePassword = async (req, res, next) => {
   }
 };
 
+/**
+ * @desc    Update user avatar URL
+ * @route   PUT /api/users/update-avatar
+ * @access  Private
+ */
+const updateAvatar = async (req, res, next) => {
+  const userId = req.user.id;
+  const { avatarUrl } = req.body;
+
+  try {
+    const updateQuery = `
+      UPDATE users 
+      SET avatar_url = $1 
+      WHERE id = $2 
+      RETURNING id, full_name, email, role, is_verified, created_at, avatar_url;
+    `;
+    const userRes = await pool.query(updateQuery, [avatarUrl ? avatarUrl.trim() : null, userId]);
+
+    if (userRes.rows.length === 0) {
+      const err = new Error('User not found');
+      err.statusCode = 404;
+      return next(err);
+    }
+
+    const updatedUser = userRes.rows[0];
+
+    return res.status(200).json({
+      success: true,
+      message: 'Avatar updated successfully',
+      user: {
+        id: updatedUser.id,
+        fullName: updatedUser.full_name,
+        email: updatedUser.email,
+        role: updatedUser.role,
+        isVerified: updatedUser.is_verified,
+        createdAt: updatedUser.created_at,
+        avatarUrl: updatedUser.avatar_url
+      }
+    });
+
+  } catch (err) {
+    return next(err);
+  }
+};
+
 module.exports = {
   updateFullname,
   updateEmail,
-  updatePassword
+  updatePassword,
+  updateAvatar
 };

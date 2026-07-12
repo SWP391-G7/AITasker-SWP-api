@@ -36,6 +36,7 @@ const getConversations = async (req, res, next) => {
           other_u.full_name AS other_user_name,
           other_u.email AS other_user_email,
           other_u.role AS other_user_role,
+          other_u.avatar_url AS other_user_avatar_url,
           ep.professional_title AS other_user_professional_title,
           cp.company_name AS other_user_company_name,
           COALESCE(lm.content, '') AS last_message,

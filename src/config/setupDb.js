@@ -51,6 +51,11 @@ async function initDatabase() {
     await client.query(alterQuery);
     console.log('Password column checked/added successfully.');
 
+    // Ensure users table has avatar_url column
+    console.log('Ensuring users table has "avatar_url" column...');
+    await client.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_url VARCHAR(255) DEFAULT NULL;');
+    console.log('Avatar URL column checked/added successfully.');
+
     // Ensure conversations table matches the participant-based schema (sender_id, target_id)
     console.log('Ensuring conversations table matches the participant-based schema...');
     await client.query('ALTER TABLE conversations DROP COLUMN IF EXISTS project_id;');

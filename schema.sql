@@ -36,7 +36,8 @@ CREATE TABLE users (
     role user_role NOT NULL,
     is_verified BOOLEAN DEFAULT false,
     created_at DATE DEFAULT CURRENT_DATE,
-    rating UUID REFERENCES rating(id) ON DELETE SET NULL DEFAULT NULL
+    rating UUID REFERENCES rating(id) ON DELETE SET NULL DEFAULT NULL,
+    avatar_url VARCHAR(255) DEFAULT NULL
 );
 
 -- 2. EXPERT PROFILE TABLE

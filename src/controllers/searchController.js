@@ -54,7 +54,7 @@ const searchEntities = async (req, res, next) => {
     if (target === 'jobs') {
       const includeClosed = req.query.includeClosed === 'true' || req.query.showClosed === 'true';
       queryText = `
-        SELECT j.*, c.company_name, u.full_name as client_name
+        SELECT j.*, c.company_name, u.full_name as client_name, u.avatar_url as client_avatar
         FROM job_posts j
         LEFT JOIN client_profiles c ON j.client_id = c.id
         LEFT JOIN users u ON c.id = u.id
@@ -96,7 +96,7 @@ const searchEntities = async (req, res, next) => {
 
     } else if (target === 'services') {
       queryText = `
-        SELECT s.*, e.professional_title, u.full_name as expert_name
+        SELECT s.*, e.professional_title, u.full_name as expert_name, u.avatar_url as expert_avatar
         FROM services s
         LEFT JOIN expert_profiles e ON s.expert_id = e.id
         LEFT JOIN users u ON e.id = u.id
@@ -139,7 +139,7 @@ const searchEntities = async (req, res, next) => {
 
     } else if (target === 'expert') {
       queryText = `
-        SELECT e.*, u.full_name, u.email,
+        SELECT e.*, u.full_name, u.email, u.avatar_url,
           (SELECT COUNT(*) FROM projects WHERE expert_id = e.id AND status = 'completed') AS completed_projects,
           (SELECT COUNT(*) FROM projects WHERE expert_id = e.id) AS total_projects
         FROM expert_profiles e
@@ -180,7 +180,7 @@ const searchEntities = async (req, res, next) => {
 
     } else if (target === 'client') {
       queryText = `
-        SELECT c.*, u.full_name, u.email,
+        SELECT c.*, u.full_name, u.email, u.avatar_url,
           (SELECT COUNT(*) FROM job_posts WHERE client_id = c.id) AS posted_jobs_count
         FROM client_profiles c
         INNER JOIN users u ON c.id = u.id

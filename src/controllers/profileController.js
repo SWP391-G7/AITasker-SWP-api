@@ -12,7 +12,7 @@ const getUserProfile = async (req, res, next) => {
   try {
     // 1. Fetch user general information
     const userQuery = `
-      SELECT id, full_name, email, role, is_verified, created_at 
+      SELECT id, full_name, email, role, is_verified, created_at, avatar_url 
       FROM users 
       WHERE id = $1
     `;
@@ -78,7 +78,8 @@ const getUserProfile = async (req, res, next) => {
         email: user.email,
         role: user.role,
         isVerified: user.is_verified,
-        createdAt: user.created_at
+        createdAt: user.created_at,
+        avatarUrl: user.avatar_url
       },
       clientProfile: clientProfile ? {
         id: clientProfile.id,
@@ -289,7 +290,7 @@ const updateUserRole = async (req, res, next) => {
       UPDATE users
       SET role = $1
       WHERE id = $2
-      RETURNING id, full_name, email, role, is_verified, created_at;
+      RETURNING id, full_name, email, role, is_verified, created_at, avatar_url;
     `;
     const userRes = await dbClient.query(updateRoleQuery, [role, userId]);
 
@@ -335,7 +336,8 @@ const updateUserRole = async (req, res, next) => {
         email: updatedUser.email,
         role: updatedUser.role,
         isVerified: updatedUser.is_verified,
-        createdAt: updatedUser.created_at
+        createdAt: updatedUser.created_at,
+        avatarUrl: updatedUser.avatar_url
       },
       token
     });
