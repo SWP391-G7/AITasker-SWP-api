@@ -187,8 +187,11 @@ const getJobById = async (req, res, next) => {
 
   try {
     const query = `
-      SELECT * FROM job_posts
-      WHERE id = $1;
+      SELECT j.*, c.company_name, u.full_name as client_name, u.avatar_url as client_avatar
+      FROM job_posts j
+      LEFT JOIN users u ON j.client_id = u.id
+      LEFT JOIN client_profiles c ON u.id = c.id
+      WHERE j.id = $1;
     `
 
     const result = await pool.query(query, [id])

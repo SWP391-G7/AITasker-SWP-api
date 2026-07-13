@@ -172,8 +172,11 @@ const getServiceById = async (req, res, next) => {
 
   try {
     const query = `
-      SELECT * FROM services
-      WHERE id = $1;
+      SELECT s.*, e.professional_title, u.full_name as expert_name, u.avatar_url as expert_avatar
+      FROM services s
+      LEFT JOIN users u ON s.expert_id = u.id
+      LEFT JOIN expert_profiles e ON u.id = e.id
+      WHERE s.id = $1;
     `
 
     const result = await pool.query(query, [id])

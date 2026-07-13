@@ -23,7 +23,7 @@ Example JSON:
     case 'service_description':
       return `Generate a compelling, professional service offering listing based on this casual draft: "${text}".
 You must respond with a JSON object containing exactly three string fields:
-- "title": An eye-catching, professional service title.
+- "title": An eye-catching, professional service title. Do NOT start the title with "I will" or "i will" (e.g. use "Full-Stack Web Development & API Integration" instead of "I will build a full stack website").
 - "description": A detailed explanation of your service, your process, benefits, and deliverables.
 - "tags": A comma-separated list of search tags or skills. Limit this list strictly to around 3-4 items only (e.g., python, llm, reactjs).
 
