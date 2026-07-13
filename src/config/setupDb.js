@@ -270,6 +270,30 @@ async function initDatabase() {
     await client.query('ALTER TABLE invitations ADD COLUMN IF NOT EXISTS counter_cover_letter TEXT;');
     await client.query('ALTER TABLE invitations ADD COLUMN IF NOT EXISTS counter_initiated_by UUID;');
     console.log('Invitations table columns checked/added successfully.');
+    // Ensure users table has acc_status column
+    console.log('Ensuring users table has "acc_status" column...');
+    await client.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS acc_status BOOLEAN DEFAULT true;');
+
+    // Ensure services table has status column
+    console.log('Ensuring services table has "status" column...');
+    await client.query("ALTER TABLE services ADD COLUMN IF NOT EXISTS status VARCHAR(50) DEFAULT 'pending';");
+
+    // Ensure job_status enum has "rejected" and "removed" values
+    console.log('Ensuring job_status enum has "rejected" and "removed" values...');
+    const newJobStatuses = ['rejected', 'removed'];
+    for (const val of newJobStatuses) {
+      try {
+        await client.query(`ALTER TYPE job_status ADD VALUE '${val}';`);
+        console.log(`Added ${val} status to job_status enum.`);
+      } catch (err) {
+        if (err.code !== '42710') {
+          console.warn(`Non-fatal warning adding ${val} status to job_status enum:`, err.message);
+        } else {
+          console.log(`${val} status already exists in job_status enum.`);
+        }
+      }
+    }
+
 
     // Add new notification types to notification_type enum if they don't exist
     const newNotifTypes = ['new_service_request', 'counter_service_request', 'service_request_accepted'];

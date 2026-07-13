@@ -58,10 +58,10 @@ const searchEntities = async (req, res, next) => {
         FROM job_posts j
         LEFT JOIN client_profiles c ON j.client_id = c.id
         LEFT JOIN users u ON c.id = u.id
-        WHERE 1=1
+        WHERE j.status != 'pending' AND j.status != 'removed' AND j.status != 'rejected'
       `;
       if (!includeClosed) {
-        queryText += " AND j.status != 'closed' AND j.status != 'pending'";
+        queryText += " AND j.status != 'closed'";
       }
 
       if (query && query.trim() !== '') {
@@ -100,7 +100,7 @@ const searchEntities = async (req, res, next) => {
         FROM services s
         LEFT JOIN expert_profiles e ON s.expert_id = e.id
         LEFT JOIN users u ON e.id = u.id
-        WHERE 1=1
+        WHERE s.status = 'approved'
       `;
 
       if (query && query.trim() !== '') {

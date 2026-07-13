@@ -38,6 +38,7 @@ CREATE TABLE users (
     created_at DATE DEFAULT CURRENT_DATE,
     rating UUID REFERENCES rating(id) ON DELETE SET NULL DEFAULT NULL,
     avatar_url VARCHAR(255) DEFAULT NULL
+    acc_status BOOLEAN DEFAULT true
 );
 
 -- 2. EXPERT PROFILE TABLE
@@ -73,6 +74,7 @@ CREATE TABLE services (
     tags VARCHAR(255),
     avg_rating REAL DEFAULT 0.0,
     rating UUID REFERENCES rating(id) ON DELETE SET NULL DEFAULT NULL
+    status VARCHAR(50) DEFAULT 'pending'
 );
 
 -- 5. INVITATION TABLE

@@ -123,20 +123,29 @@ async function seedDatabase() {
     console.log('\nSeeding Services (Marketplace Gigs)...');
     
     const serviceRes1 = await client.query(`
-      INSERT INTO services (expert_id, title, description, price, pricing_type, delivery_days, tags, avg_rating)
-      VALUES ($1, 'Custom RAG Pipeline Deployment', 'I will build and deploy a state-of-the-art Retrieval Augmented Generation (RAG) system using Pinecone, LangChain, and GPT-4. Perfect for searching through thousands of PDF manuals or user documentation with high accuracy.', 1500.00, 'fixed', 7, 'RAG SYSTEMS, NLP', 4.9)
+      INSERT INTO services (expert_id, title, description, price, pricing_type, delivery_days, tags, avg_rating, status)
+      VALUES ($1, 'Custom RAG Pipeline Deployment', 'I will build and deploy a state-of-the-art Retrieval Augmented Generation (RAG) system using Pinecone, LangChain, and GPT-4. Perfect for searching through thousands of PDF manuals or user documentation with high accuracy.', 1500.00, 'fixed', 7, 'RAG SYSTEMS, NLP', 4.9, 'approved')
       RETURNING id;
     `, [expertIds['expert1@example.com']]);
     const service1Id = serviceRes1.rows[0].id;
 
     await client.query(`
-      INSERT INTO services (expert_id, title, description, price, pricing_type, delivery_days, tags, avg_rating)
+      INSERT INTO services (expert_id, title, description, price, pricing_type, delivery_days, tags, avg_rating, status)
       VALUES 
-        ($1, 'LLM Fine-tuning on Custom Dataset', 'Fine-tuning open-source models (Llama-3, Mistral) on your domain-specific dataset for custom conversational agents or automated ticket routing.', 3000.00, 'fixed', 14, 'LLM TUNING, PYTORCH', 4.8),
-        ($2, 'MLOps Setup & Cloud Scaling', 'Establish automated training and deployment pipelines using AWS SageMaker and Kubernetes. Complete with monitoring dashboard and drift alerts.', 2500.00, 'fixed', 10, 'AWS SAGEMAKER, KUBERNETES', 5.0),
-        ($3, 'YOLO-based Real-time Object Detection', 'Custom YOLO model training and setup for real-time video feeds, object counting, security monitoring, or industrial sorting.', 1800.00, 'fixed', 5, 'YOLO, COMPUTER VISION', 4.8),
-        ($4, 'Multi-Agent LangChain Automation', 'Connecting multiple LLM agents together to perform complex tasks such as market research, web scraping, and automatic report drafting.', 1200.00, 'fixed', 4, 'LANGCHAIN, OPENAI API', 4.6);
+        ($1, 'LLM Fine-tuning on Custom Dataset', 'Fine-tuning open-source models (Llama-3, Mistral) on your domain-specific dataset for custom conversational agents or automated ticket routing.', 3000.00, 'fixed', 14, 'LLM TUNING, PYTORCH', 4.8, 'approved'),
+        ($2, 'MLOps Setup & Cloud Scaling', 'Establish automated training and deployment pipelines using AWS SageMaker and Kubernetes. Complete with monitoring dashboard and drift alerts.', 2500.00, 'fixed', 10, 'AWS SAGEMAKER, KUBERNETES', 5.0, 'approved'),
+        ($3, 'YOLO-based Real-time Object Detection', 'Custom YOLO model training and setup for real-time video feeds, object counting, security monitoring, or industrial sorting.', 1800.00, 'fixed', 5, 'YOLO, COMPUTER VISION', 4.8, 'approved'),
+        ($4, 'Multi-Agent LangChain Automation', 'Connecting multiple LLM agents together to perform complex tasks such as market research, web scraping, and automatic report drafting.', 1200.00, 'fixed', 4, 'LANGCHAIN, OPENAI API', 4.6, 'approved');
     `, [expertIds['expert1@example.com'], expertIds['expert2@example.com'], expertIds['expert3@example.com'], expertIds['expert4@example.com']]);
+
+    // Seed some pending services for moderation demo
+    await client.query(`
+      INSERT INTO services (expert_id, title, description, price, pricing_type, delivery_days, tags, status)
+      VALUES 
+        ($1, 'Spammy Crypto Trading Bot', 'Make 1000% returns guaranteed using this secret trading bot. Works on all exchanges.', 500.00, 'fixed', 2, 'CRYPTO, BOT', 'pending'),
+        ($2, 'Incomplete AI Assistant', '', 100.00, 'hourly', 5, 'AI, ASSISTANT', 'pending');
+    `, [expertIds['expert1@example.com'], expertIds['expert2@example.com']]);
+
     console.log(`Services created. (Example Service ID: ${service1Id})`);
 
     // ----------------------------------------------------
@@ -164,6 +173,14 @@ async function seedDatabase() {
       RETURNING id;
     `, [clientIds['client3@example.com']]);
     const job3Id = jobRes3.rows[0].id;
+
+    // Seed some pending job posts for moderation demo
+    await client.query(`
+      INSERT INTO job_posts (client_id, title, description, budget_min, budget_max, required_skill, duration_days, status)
+      VALUES 
+        ($1, 'Illegal Web Scraper Task', 'We need someone to scrape restricted user data from a competitor platform. Must bypass security controls.', 500.00, 1000.00, 'Web Scraping', 3, 'pending'),
+        ($2, 'Spam Comments Generator', '', 50.00, 100.00, 'AI Writer', 1, 'pending');
+    `, [clientIds['client1@example.com'], clientIds['client2@example.com']]);
 
     console.log(`Job posts created. (Job IDs: ${job1Id}, ${job2Id}, ${job3Id})`);
 
