@@ -145,6 +145,7 @@ const searchEntities = async (req, res, next) => {
         FROM expert_profiles e
         INNER JOIN users u ON e.id = u.id
         WHERE u.role = 'expert'
+          AND (e.professional_title IS NOT NULL OR e.skills IS NOT NULL OR e.bio IS NOT NULL)
       `;
 
       if (query && query.trim() !== '') {
@@ -185,6 +186,7 @@ const searchEntities = async (req, res, next) => {
         FROM client_profiles c
         INNER JOIN users u ON c.id = u.id
         WHERE u.role = 'client'
+          AND (c.company_name IS NOT NULL OR c.industry IS NOT NULL OR c.bio IS NOT NULL)
       `;
 
       if (query && query.trim() !== '') {

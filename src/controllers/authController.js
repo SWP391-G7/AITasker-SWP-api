@@ -356,6 +356,7 @@ const googleLogin = async (req, res, next) => {
 
     return res.status(isNewUser ? 201 : 200).json({
       success: true,
+      isNewUser,
       message: isNewUser ? 'Registration and Login successful' : 'Login successful',
       user: {
         id: user.id,
