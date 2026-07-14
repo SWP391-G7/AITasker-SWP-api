@@ -12,7 +12,7 @@ const getUserProfile = async (req, res, next) => {
   try {
     // 1. Fetch user general information
     const userQuery = `
-      SELECT id, full_name, email, role, is_verified, created_at, avatar_url 
+      SELECT id, full_name, email, role, is_verified, created_at, avatar_url, acc_status
       FROM users 
       WHERE id = $1
     `;
@@ -78,6 +78,8 @@ const getUserProfile = async (req, res, next) => {
         email: user.email,
         role: user.role,
         isVerified: user.is_verified,
+        accStatus: user.acc_status,
+        status: user.acc_status === false ? 'Suspended' : 'Active',
         createdAt: user.created_at,
         avatarUrl: user.avatar_url
       },

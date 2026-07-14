@@ -203,8 +203,8 @@ const getJobById = async (req, res, next) => {
     }
 
     const jobPost = result.rows[0]
-    // If the job is in pending status, only show it as pending to the client owner; show as closed to anyone else
-    if (jobPost.status === 'pending' && (!req.user || jobPost.client_id !== req.user.id)) {
+    // If the job is pending, only the owner and admin can see the pending status.
+    if (jobPost.status === 'pending' && (!req.user || (jobPost.client_id !== req.user.id && req.user.role !== 'admin'))) {
       jobPost.status = 'closed';
     }
 
