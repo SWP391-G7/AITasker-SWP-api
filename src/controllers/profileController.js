@@ -87,7 +87,8 @@ const getUserProfile = async (req, res, next) => {
         id: clientProfile.id,
         companyName: clientProfile.company_name,
         industry: clientProfile.industry,
-        bio: clientProfile.bio
+        bio: clientProfile.bio,
+        budget: clientProfile.budget
       } : null,
       expertProfile: expertProfile ? {
         id: expertProfile.id,

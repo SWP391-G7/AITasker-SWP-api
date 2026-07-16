@@ -22,6 +22,7 @@ const invitationRoutes = require('./routes/invitationRoutes')
 const transactionRoutes = require('./routes/transactionRoutes')
 const uploadRoutes = require('./routes/uploadRoutes')
 const adminRoutes = require('./routes/adminRoutes')
+const paymentRoutes = require('./routes/paymentRoutes')
 
 const app = express()
 
@@ -66,6 +67,7 @@ app.use('/api/invitations', invitationRoutes)
 app.use('/api/transactions', transactionRoutes)
 app.use('/api/upload', uploadRoutes)
 app.use('/api/admin', adminRoutes)
+app.use('/api/payment', paymentRoutes)
 
 // Handle 404 Route Not Found
 app.use((req, res, next) => {

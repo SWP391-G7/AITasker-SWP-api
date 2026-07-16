@@ -109,11 +109,11 @@ async function seedDatabase() {
     console.log('\nSeeding Client Profiles...');
     
     await client.query(`
-      INSERT INTO client_profiles (id, company_name, industry, bio)
+      INSERT INTO client_profiles (id, company_name, industry, bio, budget)
       VALUES 
-        ($1, 'TechCorp Solutions', 'Technology', 'A software development agency building next-generation developer tools and internal automation.'),
-        ($2, 'HealthAI Technologies', 'Healthcare', 'A digital health startup creating artificial intelligence diagnostics tools and patient triage systems.'),
-        ($3, 'EduLearn Platform', 'Education', 'An interactive platform offering personalized learning solutions for K-12 and university mathematics.');
+        ($1, 'TechCorp Solutions', 'Technology', 'A software development agency building next-generation developer tools and internal automation.', 15000.00),
+        ($2, 'HealthAI Technologies', 'Healthcare', 'A digital health startup creating artificial intelligence diagnostics tools and patient triage systems.', 25000.00),
+        ($3, 'EduLearn Platform', 'Education', 'An interactive platform offering personalized learning solutions for K-12 and university mathematics.', 5000.00);
     `, [clientIds['client1@example.com'], clientIds['client2@example.com'], clientIds['client3@example.com']]);
     console.log('Client profiles created.');
 
@@ -181,6 +181,12 @@ async function seedDatabase() {
         ($1, 'Illegal Web Scraper Task', 'We need someone to scrape restricted user data from a competitor platform. Must bypass security controls.', 500.00, 1000.00, 'Web Scraping', 3, 'pending'),
         ($2, 'Spam Comments Generator', '', 50.00, 100.00, 'AI Writer', 1, 'pending');
     `, [clientIds['client1@example.com'], clientIds['client2@example.com']]);
+
+    // Seed a removed job post (admin-removed content banner demo)
+    await client.query(`
+      INSERT INTO job_posts (client_id, title, description, budget_min, budget_max, required_skill, duration_days, status)
+      VALUES ($1, 'Removed Policy-Violation Post', 'This job post violated platform terms of service.', 100.00, 200.00, 'N/A', 1, 'removed');
+    `, [clientIds['client1@example.com']]);
 
     console.log(`Job posts created. (Job IDs: ${job1Id}, ${job2Id}, ${job3Id})`);
 

@@ -187,7 +187,7 @@ const getJobById = async (req, res, next) => {
 
   try {
     const query = `
-      SELECT j.*, c.company_name, u.full_name as client_name, u.avatar_url as client_avatar
+      SELECT j.*, c.company_name, c.budget as client_budget, u.full_name as client_name, u.avatar_url as client_avatar
       FROM job_posts j
       LEFT JOIN users u ON j.client_id = u.id
       LEFT JOIN client_profiles c ON u.id = c.id

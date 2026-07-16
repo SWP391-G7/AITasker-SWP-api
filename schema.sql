@@ -6,7 +6,7 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 -- ==========================================
 CREATE TYPE user_role AS ENUM ('client', 'expert', 'admin');
 CREATE TYPE pricing_type AS ENUM ('fixed', 'hourly');
-CREATE TYPE job_status AS ENUM ('open', 'active', 'completed', 'cancelled', 'closed');
+CREATE TYPE job_status AS ENUM ('open', 'pending', 'active', 'completed', 'cancelled', 'closed', 'removed');
 CREATE TYPE proposal_status AS ENUM ('pending', 'accepted', 'rejected');
 CREATE TYPE ai_module_type AS ENUM ('job_assistant', 'service_generator', 'matchmaking');
 CREATE TYPE project_type AS ENUM ('fixed_milestone', 'hourly_contract');
@@ -59,7 +59,8 @@ CREATE TABLE client_profiles (
     id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
     company_name VARCHAR(255),
     industry VARCHAR(255),
-    bio TEXT
+    bio TEXT,
+    budget NUMERIC(10, 2) DEFAULT 10000.00
 );
 
 -- 4. SERVICE TABLE

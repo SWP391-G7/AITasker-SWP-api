@@ -149,31 +149,19 @@ async function initDatabase() {
     await client.query('ALTER TABLE expert_profiles ADD COLUMN IF NOT EXISTS portfolio_url VARCHAR(255);');
     console.log('Onboarding columns checked/added successfully.');
     
-    // Add pending status to job_status enum
-    console.log('Ensuring job_status enum has "pending" status...');
-    try {
-      await client.query("ALTER TYPE job_status ADD VALUE 'pending';");
-      console.log('Added pending status to job_status enum.');
-    } catch (err) {
-      if (err.code !== '42710') {
-        console.warn('Non-fatal warning adding pending status to job_status enum:', err.message);
-      } else {
-        console.log('Pending status already exists in job_status enum.');
+    // Ensure job_status enum has all required values
+    console.log('Ensuring job_status enum has required values (pending, closed, removed)...');
+    const requiredJobStatuses = ['pending', 'closed', 'removed'];
+    for (const val of requiredJobStatuses) {
+      try {
+        await client.query(`ALTER TYPE job_status ADD VALUE IF NOT EXISTS '${val}';`);
+      } catch (err) {
+        if (err.code !== '42710' && err.code !== '42704') {
+          console.warn(`Non-fatal warning adding '${val}' to job_status enum:`, err.message);
+        }
       }
     }
-
-    // Add closed status to job_status enum
-    console.log('Ensuring job_status enum has "closed" status...');
-    try {
-      await client.query("ALTER TYPE job_status ADD VALUE 'closed';");
-      console.log('Added closed status to job_status enum.');
-    } catch (err) {
-      if (err.code !== '42710') {
-        console.warn('Non-fatal warning adding closed status to job_status enum:', err.message);
-      } else {
-        console.log('Closed status already exists in job_status enum.');
-      }
-    }
+    console.log('job_status enum values checked/added successfully.');
 
     // Add counter-proposal columns to proposals table
     console.log('Ensuring proposals table has counter-proposal columns...');
@@ -278,21 +266,7 @@ async function initDatabase() {
     console.log('Ensuring services table has "status" column...');
     await client.query("ALTER TABLE services ADD COLUMN IF NOT EXISTS status VARCHAR(50) DEFAULT 'pending';");
 
-    // Ensure job_status enum has "rejected" and "removed" values
-    console.log('Ensuring job_status enum has "rejected" and "removed" values...');
-    const newJobStatuses = ['rejected', 'removed'];
-    for (const val of newJobStatuses) {
-      try {
-        await client.query(`ALTER TYPE job_status ADD VALUE '${val}';`);
-        console.log(`Added ${val} status to job_status enum.`);
-      } catch (err) {
-        if (err.code !== '42710') {
-          console.warn(`Non-fatal warning adding ${val} status to job_status enum:`, err.message);
-        } else {
-          console.log(`${val} status already exists in job_status enum.`);
-        }
-      }
-    }
+    // (Covered by requiredJobStatuses loop above)
 
 
     // Add new notification types to notification_type enum if they don't exist
