@@ -206,6 +206,17 @@ const mockChargeCard = async (req, res, next) => {
     return res.status(400).json({ success: false, message: 'Expiry date must be MM/YY' });
   }
 
+  if (cardAmount > 0) {
+    const [monthText, yearText] = expiry.split('/');
+    const expiryMonth = Number(monthText);
+    const expiryYear = 2000 + Number(yearText);
+    const now = new Date();
+    const cardExpiry = new Date(expiryYear, expiryMonth, 0, 23, 59, 59, 999);
+    if (expiryMonth < 1 || expiryMonth > 12 || cardExpiry < now) {
+      return res.status(400).json({ success: false, message: 'Card expiry date is invalid or has expired' });
+    }
+  }
+
   if (cardAmount > 0 && (!cvv || cvv.length !== 3 || isNaN(cvv))) {
     return res.status(400).json({ success: false, message: 'CVV must be 3 digits' });
   }
@@ -221,6 +232,13 @@ const mockChargeCard = async (req, res, next) => {
     const errorMsg = 'Payment details invalid: Insufficient funds.';
     console.error(`[Mock 3rd Party Payment Error] Insufficient funds trigger. Card: ${sanitizedCard}`);
     return res.status(400).json({ success: false, message: errorMsg });
+  }
+
+  if (cardAmount > 0 && sanitizedCard !== '4242424242424242') {
+    return res.status(400).json({
+      success: false,
+      message: 'Unsupported sandbox card. Use 4242 4242 4242 4242 for a successful test payment.'
+    });
   }
 
   // Card is validated. Send cryptographic webhook request to merchant app
