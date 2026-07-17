@@ -11,13 +11,15 @@ const getMyTransactions = async (req, res, next) => {
 
   try {
     // 1. Fetch transactions list
+    const expertTypeFilter = userRole === 'expert' ? "AND t.type = 'escrow_release'" : '';
     const sql = `
       SELECT t.*, p.title as project_title, uc.full_name as client_name, ue.full_name as expert_name
       FROM transactions t
       LEFT JOIN projects p ON t.project_id = p.id
       LEFT JOIN users uc ON t.sender_id = uc.id
       LEFT JOIN users ue ON t.receiver_id = ue.id
-      WHERE t.receiver_id = $1 OR t.sender_id = $1
+      WHERE (t.receiver_id = $1 OR t.sender_id = $1)
+      ${expertTypeFilter}
       ORDER BY t.complete_at DESC;
     `;
     const result = await pool.query(sql, [userId]);
@@ -29,9 +31,10 @@ const getMyTransactions = async (req, res, next) => {
     let inEscrow = 0;
 
     if (userRole === 'expert') {
-      // Lifetime earnings = sum of completed transactions where receiver_id is expert
+      // Only released escrow is earned. Deposits remain locked and must not be
+      // presented as available expert income.
       const lifetimeRes = await pool.query(
-        "SELECT COALESCE(SUM(amount), 0) as total FROM transactions WHERE receiver_id = $1 AND status = 'completed';",
+        "SELECT COALESCE(SUM(amount), 0) as total FROM transactions WHERE receiver_id = $1 AND type = 'escrow_release' AND status = 'completed';",
         [userId]
       );
       totalLifetime = parseFloat(lifetimeRes.rows[0].total || 0);
@@ -41,34 +44,40 @@ const getMyTransactions = async (req, res, next) => {
 
       // Pending clearance = sum of pending transactions
       const pendingRes = await pool.query(
-        "SELECT COALESCE(SUM(amount), 0) as total FROM transactions WHERE receiver_id = $1 AND status = 'pending';",
+        "SELECT COALESCE(SUM(amount), 0) as total FROM transactions WHERE receiver_id = $1 AND type = 'escrow_release' AND status = 'pending';",
         [userId]
       );
       pendingClearance = parseFloat(pendingRes.rows[0].total || 0);
 
-      // In Escrow = sum of milestone amounts that are 'funded' or 'submitted' for expert's projects
+      // In escrow is funded money minus amounts already released.
       const escrowRes = await pool.query(
-        `SELECT COALESCE(SUM(m.amount), 0) as total 
-         FROM milestones m 
-         JOIN projects p ON m.project_id = p.id 
-         WHERE p.expert_id = $1 AND m.status IN ('funded', 'submitted');`,
+        `SELECT GREATEST(
+           COALESCE(SUM(amount) FILTER (WHERE type = 'escrow_deposit' AND status = 'completed'), 0) -
+           COALESCE(SUM(amount) FILTER (WHERE type = 'escrow_release' AND status = 'completed'), 0),
+           0
+         ) AS total
+         FROM transactions WHERE receiver_id = $1;`,
         [userId]
       );
       inEscrow = parseFloat(escrowRes.rows[0].total || 0);
     } else if (userRole === 'client') {
-      // Total spent = sum of completed transactions where sender_id is client
+      // Client spend is money released to experts, not the initial escrow
+      // deposit (otherwise the same funds are counted twice).
       const spentRes = await pool.query(
-        "SELECT COALESCE(SUM(amount), 0) as total FROM transactions WHERE sender_id = $1 AND status = 'completed';",
+        "SELECT COALESCE(SUM(amount), 0) as total FROM transactions WHERE sender_id = $1 AND type = 'escrow_release' AND status = 'completed';",
         [userId]
       );
       totalLifetime = parseFloat(spentRes.rows[0].total || 0); // Reuse totalLifetime variable as total spent
 
-      // In Escrow = sum of milestone amounts that are 'funded' or 'submitted' for client's projects
+      // Deposits minus releases/refunds remain locked in escrow, even before
+      // the expert has created the milestone plan.
       const escrowRes = await pool.query(
-        `SELECT COALESCE(SUM(m.amount), 0) as total 
-         FROM milestones m 
-         JOIN projects p ON m.project_id = p.id 
-         WHERE p.client_id = $1 AND m.status IN ('funded', 'submitted');`,
+        `SELECT GREATEST(
+           COALESCE(SUM(amount) FILTER (WHERE type = 'escrow_deposit' AND status = 'completed'), 0) -
+           COALESCE(SUM(amount) FILTER (WHERE type IN ('escrow_release', 'refund') AND status = 'completed'), 0),
+           0
+         ) AS total
+         FROM transactions WHERE sender_id = $1;`,
         [userId]
       );
       inEscrow = parseFloat(escrowRes.rows[0].total || 0);
