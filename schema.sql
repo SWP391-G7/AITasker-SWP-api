@@ -1,3 +1,4 @@
+
 -- Enable UUID extension if not already active
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
@@ -37,7 +38,7 @@ CREATE TABLE users (
     is_verified BOOLEAN DEFAULT false,
     created_at DATE DEFAULT CURRENT_DATE,
     rating UUID REFERENCES rating(id) ON DELETE SET NULL DEFAULT NULL,
-    avatar_url VARCHAR(255) DEFAULT NULL
+    avatar_url VARCHAR(255) DEFAULT NULL,
     acc_status BOOLEAN DEFAULT true
 );
 
@@ -74,7 +75,7 @@ CREATE TABLE services (
     delivery_days INT NOT NULL,
     tags VARCHAR(255),
     avg_rating REAL DEFAULT 0.0,
-    rating UUID REFERENCES rating(id) ON DELETE SET NULL DEFAULT NULL
+    rating UUID REFERENCES rating(id) ON DELETE SET NULL DEFAULT NULL,
     status VARCHAR(50) DEFAULT 'pending'
 );
 
