@@ -102,14 +102,15 @@ const createProject = async (req, res, next) => {
 
     // 1. Create the project
     const insertQuery = `
-      INSERT INTO projects (expert_id, client_id, type, status, total_amount, title, description, proposal_id)
-      VALUES ($1, $2, 'fixed_milestone', 'Planning', $3, $4, $5, $6)
+      INSERT INTO projects (expert_id, client_id, type, status, total_amount, duration_days, title, description, proposal_id)
+      VALUES ($1, $2, 'fixed_milestone', 'Planning', $3, $4, $5, $6, $7)
       RETURNING *;
     `;
     const projectValues = [
       proposal.expert_id,
       jobPost.client_id,
       proposal.bid_amount,
+      jobPost.duration_days || proposal.delivery_days,
       jobPost.title,
       jobPost.description,
       proposal.id

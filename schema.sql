@@ -137,6 +137,7 @@ CREATE TABLE projects (
     type project_type NOT NULL,
     status project_status DEFAULT 'active',
     total_amount NUMERIC(10, 2) NOT NULL,
+    duration_days INTEGER,
     proposal_id UUID REFERENCES proposals(id),
     invitation_id UUID REFERENCES invitations(id),
     deliverable BOOLEAN DEFAULT false,

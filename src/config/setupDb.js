@@ -189,6 +189,7 @@ async function initDatabase() {
     console.log('Ensuring projects table has title and description columns...');
     await client.query('ALTER TABLE projects ADD COLUMN IF NOT EXISTS title VARCHAR(255);');
     await client.query('ALTER TABLE projects ADD COLUMN IF NOT EXISTS description TEXT;');
+    await client.query('ALTER TABLE projects ADD COLUMN IF NOT EXISTS duration_days INTEGER;');
     console.log('Projects table columns checked/added successfully.');
 
     // Add requirements column to job_posts
@@ -249,6 +250,17 @@ async function initDatabase() {
     }
     console.log('Milestone status enum values checked/added.');
 
+    // Normalize milestone plans created by older builds so clients can review them.
+    await client.query(`
+      UPDATE milestones m
+      SET status = 'planning'
+      FROM projects p
+      WHERE m.project_id = p.id
+        AND m.status = 'Pending'
+        AND p.status = 'Planning'
+        AND m.deliverable_url IS NULL;
+    `);
+
     // Ensure invitations table has columns for the service request flow
     console.log('Ensuring invitations table has service request columns...');
     await client.query('ALTER TABLE invitations ADD COLUMN IF NOT EXISTS cover_letter TEXT;');
@@ -270,6 +282,21 @@ async function initDatabase() {
     await client.query('ALTER TABLE transactions ADD COLUMN IF NOT EXISTS external_amount NUMERIC(10, 2) DEFAULT 0;');
     await client.query('ALTER TABLE projects ADD COLUMN IF NOT EXISTS proposal_id UUID;');
     await client.query('ALTER TABLE projects ADD COLUMN IF NOT EXISTS invitation_id UUID;');
+    await client.query(`
+      UPDATE projects p
+      SET duration_days = COALESCE(j.duration_days, pr.delivery_days)
+      FROM proposals pr
+      JOIN job_posts j ON j.id = pr.job_id
+      WHERE p.proposal_id = pr.id
+        AND p.duration_days IS NULL;
+    `);
+    await client.query(`
+      UPDATE projects p
+      SET duration_days = i.delivery_days
+      FROM invitations i
+      WHERE p.invitation_id = i.id
+        AND p.duration_days IS NULL;
+    `);
     await client.query('CREATE UNIQUE INDEX IF NOT EXISTS idx_transactions_funded_proposal ON transactions(proposal_id) WHERE proposal_id IS NOT NULL AND status = \'completed\';');
     await client.query('CREATE UNIQUE INDEX IF NOT EXISTS idx_transactions_funded_invitation ON transactions(invitation_id) WHERE invitation_id IS NOT NULL AND status = \'completed\';');
     await client.query("CREATE UNIQUE INDEX IF NOT EXISTS idx_transactions_released_milestone ON transactions(milestone_id) WHERE milestone_id IS NOT NULL AND type = 'escrow_release' AND status = 'completed';");

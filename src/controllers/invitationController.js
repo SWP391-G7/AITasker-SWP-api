@@ -571,14 +571,15 @@ const startProject = async (req, res, next) => {
 
     // Create the project
     const insertProjectQuery = `
-      INSERT INTO projects (expert_id, client_id, type, status, total_amount, title, description, invitation_id)
-      VALUES ($1, $2, 'fixed_milestone', 'Planning', $3, $4, $5, $6)
+      INSERT INTO projects (expert_id, client_id, type, status, total_amount, duration_days, title, description, invitation_id)
+      VALUES ($1, $2, 'fixed_milestone', 'Planning', $3, $4, $5, $6, $7)
       RETURNING *;
     `
     const projectRes = await pool.query(insertProjectQuery, [
       invitation.expert_id,
       invitation.client_id,
       invitation.bid_amount,
+      invitation.delivery_days,
       invitation.service_title,
       invitation.cover_letter || invitation.service_description,
       invitation.id

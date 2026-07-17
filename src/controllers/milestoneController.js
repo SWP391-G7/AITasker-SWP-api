@@ -55,7 +55,7 @@ const submitMilestonePlan = async (req, res, next) => {
   try {
     // Verify project exists and belongs to the expert
     const projectCheck = await pool.query(
-      'SELECT id, expert_id FROM projects WHERE id = $1',
+      'SELECT id, expert_id, duration_days FROM projects WHERE id = $1',
       [projectId]
     );
 
@@ -69,6 +69,19 @@ const submitMilestonePlan = async (req, res, next) => {
     if (project.expert_id !== userId && userRole !== 'admin') {
       const err = new Error('Forbidden: You can only submit plans for your own projects');
       err.statusCode = 403;
+      return next(err);
+    }
+
+    const planDuration = milestones.reduce(
+      (total, milestone) => total + parseInt(milestone.delivery_days, 10),
+      0
+    );
+    const projectDuration = parseInt(project.duration_days, 10);
+    if (!isNaN(projectDuration) && projectDuration > 0 && planDuration > projectDuration) {
+      const err = new Error(
+        `Total milestone delivery time (${planDuration} days) cannot exceed project duration (${projectDuration} days)`
+      );
+      err.statusCode = 400;
       return next(err);
     }
 
@@ -87,7 +100,7 @@ const submitMilestonePlan = async (req, res, next) => {
       const row = await pool.query(
         `INSERT INTO milestones
            (project_id, title, content, amount, delivery_days, status, position)
-         VALUES ($1, $2, $3, $4, $5, 'Pending', $6)
+         VALUES ($1, $2, $3, $4, $5, 'planning', $6)
          RETURNING *;`,
         [
           projectId,
@@ -185,7 +198,7 @@ const approveMilestonePlan = async (req, res, next) => {
 
   try {
     const projectCheck = await pool.query(
-      'SELECT id, client_id, total_amount FROM projects WHERE id = $1',
+      'SELECT id, client_id, total_amount, duration_days FROM projects WHERE id = $1',
       [projectId]
     );
 
@@ -213,13 +226,23 @@ const approveMilestonePlan = async (req, res, next) => {
     }
 
     const planTotalRes = await pool.query(
-      "SELECT COALESCE(SUM(amount), 0) AS total FROM milestones WHERE project_id = $1 AND status = 'planning'",
+      "SELECT COALESCE(SUM(amount), 0) AS total, COALESCE(SUM(delivery_days), 0) AS total_days FROM milestones WHERE project_id = $1 AND status = 'planning'",
       [projectId]
     );
     const planTotal = parseFloat(planTotalRes.rows[0].total || 0);
     const projectTotal = parseFloat(projectCheck.rows[0].total_amount || 0);
     if (Math.abs(planTotal - projectTotal) > 0.01) {
       const err = new Error(`Milestone amounts must total the project value (${projectTotal.toFixed(2)}). Current total: ${planTotal.toFixed(2)}`);
+      err.statusCode = 400;
+      return next(err);
+    }
+
+    const planDuration = parseInt(planTotalRes.rows[0].total_days || 0, 10);
+    const projectDuration = parseInt(projectCheck.rows[0].duration_days, 10);
+    if (!isNaN(projectDuration) && projectDuration > 0 && planDuration > projectDuration) {
+      const err = new Error(
+        `Total milestone delivery time (${planDuration} days) cannot exceed project duration (${projectDuration} days)`
+      );
       err.statusCode = 400;
       return next(err);
     }
