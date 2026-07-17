@@ -174,6 +174,10 @@ CREATE TABLE milestones (
     amount NUMERIC(10, 2) NOT NULL,
     status milestone_status DEFAULT 'pending',
     due_date TIMESTAMP,
+    submitted_at TIMESTAMP,
+    late_days INTEGER DEFAULT 0,
+    penalty_amount NUMERIC(10, 2) DEFAULT 0,
+    released_amount NUMERIC(10, 2),
     response TEXT DEFAULT NULL,
     deliverable BOOLEAN DEFAULT false
 );

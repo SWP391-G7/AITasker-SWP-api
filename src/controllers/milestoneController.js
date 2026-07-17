@@ -77,13 +77,7 @@ const submitMilestonePlan = async (req, res, next) => {
       0
     );
     const projectDuration = parseInt(project.duration_days, 10);
-    if (!isNaN(projectDuration) && projectDuration > 0 && planDuration > projectDuration) {
-      const err = new Error(
-        `Total milestone delivery time (${planDuration} days) cannot exceed project duration (${projectDuration} days)`
-      );
-      err.statusCode = 400;
-      return next(err);
-    }
+    const extensionRequested = !isNaN(projectDuration) && projectDuration > 0 && planDuration > projectDuration;
 
     await pool.query('BEGIN');
 
@@ -139,6 +133,8 @@ const submitMilestonePlan = async (req, res, next) => {
       success: true,
       message: 'Milestone plan submitted for client review',
       milestones: created,
+      extensionRequested,
+      requestedDurationDays: extensionRequested ? planDuration : null,
     });
   } catch (error) {
     await pool.query('ROLLBACK');
@@ -195,6 +191,7 @@ const approveMilestonePlan = async (req, res, next) => {
   const { projectId } = req.params;
   const userId   = req.user.id;
   const userRole = req.user.role;
+  const { approve_duration_extension: approveDurationExtension = false } = req.body || {};
 
   try {
     const projectCheck = await pool.query(
@@ -239,12 +236,16 @@ const approveMilestonePlan = async (req, res, next) => {
 
     const planDuration = parseInt(planTotalRes.rows[0].total_days || 0, 10);
     const projectDuration = parseInt(projectCheck.rows[0].duration_days, 10);
-    if (!isNaN(projectDuration) && projectDuration > 0 && planDuration > projectDuration) {
-      const err = new Error(
-        `Total milestone delivery time (${planDuration} days) cannot exceed project duration (${projectDuration} days)`
-      );
-      err.statusCode = 400;
-      return next(err);
+    const durationExtended = !isNaN(projectDuration) && projectDuration > 0 && planDuration > projectDuration;
+    if (durationExtended) {
+      if (!approveDurationExtension) {
+        const err = new Error(
+          `This plan requests a duration extension from ${projectDuration} to ${planDuration} days. Client approval of the extension is required.`
+        );
+        err.statusCode = 400;
+        return next(err);
+      }
+      await pool.query('UPDATE projects SET duration_days = $1 WHERE id = $2', [planDuration, projectId]);
     }
 
     const result = await pool.query(
@@ -256,6 +257,8 @@ const approveMilestonePlan = async (req, res, next) => {
       success: true,
       message: 'Milestone plan approved',
       milestones: result.rows,
+      durationExtended,
+      durationDays: durationExtended ? planDuration : projectDuration,
     });
   } catch (error) {
     return next(error);
@@ -589,6 +592,7 @@ const submitDeliverable = async (req, res, next) => {
        SET status = 'submitted',
            deliverable_url  = $1,
            deliverable_note = $2,
+           submitted_at = COALESCE(submitted_at, CURRENT_TIMESTAMP),
            change_request_note = NULL
        WHERE id = $3 RETURNING *;`,
       [
@@ -670,22 +674,33 @@ const approveDeliverable = async (req, res, next) => {
     const escrowRes = await dbClient.query(
       `SELECT
          COALESCE(SUM(amount) FILTER (WHERE type = 'escrow_deposit' AND status = 'completed'), 0) AS deposited,
-         COALESCE(SUM(amount) FILTER (WHERE type = 'escrow_release' AND status = 'completed'), 0) AS released
+         COALESCE(SUM(amount) FILTER (WHERE type = 'escrow_release' AND status = 'completed'), 0) AS released,
+         COALESCE(SUM(amount) FILTER (WHERE type = 'refund' AND status = 'completed'), 0) AS refunded
        FROM transactions WHERE project_id = $1`,
       [milestone.project_id]
     );
     const deposited = parseFloat(escrowRes.rows[0].deposited || 0);
     const released = parseFloat(escrowRes.rows[0].released || 0);
-    const releaseAmount = parseFloat(milestone.amount || 0);
-    if (releaseAmount <= 0 || released + releaseAmount > deposited + 0.01) {
+    const refunded = parseFloat(escrowRes.rows[0].refunded || 0);
+    const milestoneAmount = parseFloat(milestone.amount || 0);
+    const submittedAt = milestone.submitted_at ? new Date(milestone.submitted_at) : new Date();
+    const deadline = milestone.deadline ? new Date(milestone.deadline) : null;
+    const millisecondsPerDay = 24 * 60 * 60 * 1000;
+    const lateDays = deadline && submittedAt > deadline
+      ? Math.ceil((submittedAt.getTime() - deadline.getTime()) / millisecondsPerDay)
+      : 0;
+    const penaltyRate = Math.min(lateDays * 0.01, 0.2);
+    const penaltyAmount = Math.round(milestoneAmount * penaltyRate * 100) / 100;
+    const releaseAmount = Math.round((milestoneAmount - penaltyAmount) * 100) / 100;
+    if (releaseAmount <= 0 || released + refunded + milestoneAmount > deposited + 0.01) {
       const err = new Error('Insufficient project escrow for this milestone release');
       err.statusCode = 400;
       throw err;
     }
 
     const result = await dbClient.query(
-      "UPDATE milestones SET status = 'Finished' WHERE id = $1 RETURNING *;",
-      [id]
+      "UPDATE milestones SET status = 'finished', late_days = $2, penalty_amount = $3, released_amount = $4 WHERE id = $1 RETURNING *;",
+      [id, lateDays, penaltyAmount, releaseAmount]
     );
     const transactionRes = await dbClient.query(
       `INSERT INTO transactions (project_id, milestone_id, sender_id, receiver_id, amount, type, status, funding_source, wallet_amount, external_amount, complete_at)
@@ -694,8 +709,23 @@ const approveDeliverable = async (req, res, next) => {
       [milestone.project_id, milestone.id, milestone.client_id, milestone.expert_id, releaseAmount]
     );
 
+    let refundTransaction = null;
+    if (penaltyAmount > 0) {
+      const refundRes = await dbClient.query(
+        `INSERT INTO transactions (project_id, milestone_id, sender_id, receiver_id, amount, type, status, funding_source, wallet_amount, external_amount, complete_at)
+         VALUES ($1, $2, $3, $3, $4, 'refund', 'completed', 'escrow', $4, 0, CURRENT_TIMESTAMP)
+         RETURNING *;`,
+        [milestone.project_id, milestone.id, milestone.client_id, penaltyAmount]
+      );
+      refundTransaction = refundRes.rows[0];
+      await dbClient.query(
+        'UPDATE client_profiles SET budget = COALESCE(budget, 0) + $1 WHERE id = $2',
+        [penaltyAmount, milestone.client_id]
+      );
+    }
+
     const remainingRes = await dbClient.query(
-      "SELECT COUNT(*)::int AS count FROM milestones WHERE project_id = $1 AND status <> 'Finished'",
+      "SELECT COUNT(*)::int AS count FROM milestones WHERE project_id = $1 AND status <> 'finished'",
       [milestone.project_id]
     );
     const projectCompleted = remainingRes.rows[0].count === 0;
@@ -707,7 +737,9 @@ const approveDeliverable = async (req, res, next) => {
     try {
       await sendNotification(milestone.expert_id, {
         title: 'Milestone Approved — Payment Released',
-        message: `The client approved "${milestone.title}" and released ${releaseAmount.toFixed(2)} from escrow.`,
+        message: lateDays > 0
+          ? `The client approved "${milestone.title}". ${lateDays} late day(s) resulted in a ${penaltyAmount.toFixed(2)} penalty; ${releaseAmount.toFixed(2)} was released.`
+          : `The client approved "${milestone.title}" and released ${releaseAmount.toFixed(2)} from escrow.`,
         type: 'milestone_approved',
         referenceId: milestone.id
       });
@@ -720,6 +752,10 @@ const approveDeliverable = async (req, res, next) => {
       message: 'Deliverable approved and milestone funds released from escrow',
       milestone: result.rows[0],
       transaction: transactionRes.rows[0],
+      refundTransaction,
+      lateDays,
+      penaltyAmount,
+      releasedAmount: releaseAmount,
       projectCompleted,
     });
   } catch (error) {

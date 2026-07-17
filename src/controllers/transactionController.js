@@ -51,9 +51,9 @@ const getMyTransactions = async (req, res, next) => {
 
       // In escrow is funded money minus amounts already released.
       const escrowRes = await pool.query(
-        `SELECT GREATEST(
+         `SELECT GREATEST(
            COALESCE(SUM(amount) FILTER (WHERE type = 'escrow_deposit' AND status = 'completed'), 0) -
-           COALESCE(SUM(amount) FILTER (WHERE type = 'escrow_release' AND status = 'completed'), 0),
+           COALESCE(SUM(amount) FILTER (WHERE type IN ('escrow_release', 'refund') AND status = 'completed'), 0),
            0
          ) AS total
          FROM transactions WHERE receiver_id = $1;`,
@@ -61,6 +61,12 @@ const getMyTransactions = async (req, res, next) => {
       );
       inEscrow = parseFloat(escrowRes.rows[0].total || 0);
     } else if (userRole === 'client') {
+      const balanceRes = await pool.query(
+        'SELECT COALESCE(budget, 0) AS balance FROM client_profiles WHERE id = $1',
+        [userId]
+      );
+      availableNow = parseFloat(balanceRes.rows[0]?.balance || 0);
+
       // Client spend is money released to experts, not the initial escrow
       // deposit (otherwise the same funds are counted twice).
       const spentRes = await pool.query(
