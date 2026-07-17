@@ -264,6 +264,7 @@ async function initDatabase() {
     await client.query("ALTER TABLE invitations ADD COLUMN IF NOT EXISTS payment_status VARCHAR(20) DEFAULT 'unpaid';");
     await client.query('ALTER TABLE transactions ADD COLUMN IF NOT EXISTS proposal_id UUID;');
     await client.query('ALTER TABLE transactions ADD COLUMN IF NOT EXISTS invitation_id UUID;');
+    await client.query('ALTER TABLE transactions ADD COLUMN IF NOT EXISTS milestone_id UUID;');
     await client.query("ALTER TABLE transactions ADD COLUMN IF NOT EXISTS funding_source VARCHAR(20) DEFAULT 'card';");
     await client.query('ALTER TABLE transactions ADD COLUMN IF NOT EXISTS wallet_amount NUMERIC(10, 2) DEFAULT 0;');
     await client.query('ALTER TABLE transactions ADD COLUMN IF NOT EXISTS external_amount NUMERIC(10, 2) DEFAULT 0;');
@@ -271,6 +272,7 @@ async function initDatabase() {
     await client.query('ALTER TABLE projects ADD COLUMN IF NOT EXISTS invitation_id UUID;');
     await client.query('CREATE UNIQUE INDEX IF NOT EXISTS idx_transactions_funded_proposal ON transactions(proposal_id) WHERE proposal_id IS NOT NULL AND status = \'completed\';');
     await client.query('CREATE UNIQUE INDEX IF NOT EXISTS idx_transactions_funded_invitation ON transactions(invitation_id) WHERE invitation_id IS NOT NULL AND status = \'completed\';');
+    await client.query("CREATE UNIQUE INDEX IF NOT EXISTS idx_transactions_released_milestone ON transactions(milestone_id) WHERE milestone_id IS NOT NULL AND type = 'escrow_release' AND status = 'completed';");
     await client.query('CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_proposal ON projects(proposal_id) WHERE proposal_id IS NOT NULL;');
     await client.query('CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_invitation ON projects(invitation_id) WHERE invitation_id IS NOT NULL;');
     console.log('Invitations table columns checked/added successfully.');

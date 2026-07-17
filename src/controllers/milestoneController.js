@@ -185,7 +185,7 @@ const approveMilestonePlan = async (req, res, next) => {
 
   try {
     const projectCheck = await pool.query(
-      'SELECT id, client_id FROM projects WHERE id = $1',
+      'SELECT id, client_id, total_amount FROM projects WHERE id = $1',
       [projectId]
     );
 
@@ -208,6 +208,18 @@ const approveMilestonePlan = async (req, res, next) => {
 
     if (parseInt(planningCount.rows[0].count, 10) === 0) {
       const err = new Error('No planning milestones found to approve');
+      err.statusCode = 400;
+      return next(err);
+    }
+
+    const planTotalRes = await pool.query(
+      "SELECT COALESCE(SUM(amount), 0) AS total FROM milestones WHERE project_id = $1 AND status = 'planning'",
+      [projectId]
+    );
+    const planTotal = parseFloat(planTotalRes.rows[0].total || 0);
+    const projectTotal = parseFloat(projectCheck.rows[0].total_amount || 0);
+    if (Math.abs(planTotal - projectTotal) > 0.01) {
+      const err = new Error(`Milestone amounts must total the project value (${projectTotal.toFixed(2)}). Current total: ${planTotal.toFixed(2)}`);
       err.statusCode = 400;
       return next(err);
     }
@@ -587,7 +599,7 @@ const submitDeliverable = async (req, res, next) => {
 };
 
 /**
- * @desc    Approve a submitted deliverable (submitted → pending_payment)
+ * @desc    Approve a submitted deliverable and release its agreed escrow amount
  * @route   PUT /api/milestones/:id/approve-deliverable
  * @access  Private (Client only)
  */
@@ -595,10 +607,11 @@ const approveDeliverable = async (req, res, next) => {
   const { id }   = req.params;
   const userId   = req.user.id;
   const userRole = req.user.role;
+  let dbClient;
 
   try {
     const milestoneRes = await pool.query(
-      'SELECT m.*, p.client_id FROM milestones m JOIN projects p ON m.project_id = p.id WHERE m.id = $1;',
+      'SELECT m.*, p.client_id, p.expert_id, p.total_amount FROM milestones m JOIN projects p ON m.project_id = p.id WHERE m.id = $1;',
       [id]
     );
 
@@ -622,18 +635,75 @@ const approveDeliverable = async (req, res, next) => {
       return next(err);
     }
 
-    const result = await pool.query(
-      "UPDATE milestones SET status = 'pending_payment' WHERE id = $1 RETURNING *;",
+    dbClient = await pool.connect();
+    await dbClient.query('BEGIN');
+    const lockRes = await dbClient.query('SELECT status FROM milestones WHERE id = $1 FOR UPDATE', [id]);
+    if (!lockRes.rows.length || lockRes.rows[0].status !== 'submitted') {
+      const err = new Error('Milestone was already processed');
+      err.statusCode = 409;
+      throw err;
+    }
+
+    const escrowRes = await dbClient.query(
+      `SELECT
+         COALESCE(SUM(amount) FILTER (WHERE type = 'escrow_deposit' AND status = 'completed'), 0) AS deposited,
+         COALESCE(SUM(amount) FILTER (WHERE type = 'escrow_release' AND status = 'completed'), 0) AS released
+       FROM transactions WHERE project_id = $1`,
+      [milestone.project_id]
+    );
+    const deposited = parseFloat(escrowRes.rows[0].deposited || 0);
+    const released = parseFloat(escrowRes.rows[0].released || 0);
+    const releaseAmount = parseFloat(milestone.amount || 0);
+    if (releaseAmount <= 0 || released + releaseAmount > deposited + 0.01) {
+      const err = new Error('Insufficient project escrow for this milestone release');
+      err.statusCode = 400;
+      throw err;
+    }
+
+    const result = await dbClient.query(
+      "UPDATE milestones SET status = 'Finished' WHERE id = $1 RETURNING *;",
       [id]
     );
+    const transactionRes = await dbClient.query(
+      `INSERT INTO transactions (project_id, milestone_id, sender_id, receiver_id, amount, type, status, funding_source, wallet_amount, external_amount, complete_at)
+       VALUES ($1, $2, $3, $4, $5, 'escrow_release', 'completed', 'escrow', 0, 0, CURRENT_TIMESTAMP)
+       RETURNING *;`,
+      [milestone.project_id, milestone.id, milestone.client_id, milestone.expert_id, releaseAmount]
+    );
+
+    const remainingRes = await dbClient.query(
+      "SELECT COUNT(*)::int AS count FROM milestones WHERE project_id = $1 AND status <> 'Finished'",
+      [milestone.project_id]
+    );
+    const projectCompleted = remainingRes.rows[0].count === 0;
+    if (projectCompleted) {
+      await dbClient.query("UPDATE projects SET status = 'Completed', end_date = CURRENT_TIMESTAMP WHERE id = $1", [milestone.project_id]);
+    }
+    await dbClient.query('COMMIT');
+
+    try {
+      await sendNotification(milestone.expert_id, {
+        title: 'Milestone Approved — Payment Released',
+        message: `The client approved "${milestone.title}" and released ${releaseAmount.toFixed(2)} from escrow.`,
+        type: 'milestone_approved',
+        referenceId: milestone.id
+      });
+    } catch (notifErr) {
+      console.error('[Notification Trigger Error] approveDeliverable:', notifErr.message);
+    }
 
     return res.status(200).json({
       success: true,
-      message: 'Deliverable approved — awaiting payment',
+      message: 'Deliverable approved and milestone funds released from escrow',
       milestone: result.rows[0],
+      transaction: transactionRes.rows[0],
+      projectCompleted,
     });
   } catch (error) {
+    if (dbClient) await dbClient.query('ROLLBACK');
     return next(error);
+  } finally {
+    if (dbClient) dbClient.release();
   }
 };
 
@@ -734,8 +804,8 @@ const payMilestone = async (req, res, next) => {
       return next(err);
     }
 
-    if (milestone.status !== 'Wait for payment') {
-      const err = new Error('Milestone must be in "Wait for payment" state to pay');
+    if (!['Wait for payment', 'pending_payment'].includes(milestone.status)) {
+      const err = new Error('Milestone must be awaiting payment');
       err.statusCode = 400;
       return next(err);
     }
@@ -751,9 +821,9 @@ const payMilestone = async (req, res, next) => {
 
     // Log transaction
     const transactionRes = await pool.query(
-      `INSERT INTO transactions (project_id, sender_id, receiver_id, amount, type, status, complete_at)
-       VALUES ($1, $2, $3, $4, 'escrow_release', 'completed', CURRENT_TIMESTAMP) RETURNING *;`,
-      [milestone.project_id, milestone.client_id, milestone.expert_id, milestone.amount]
+      `INSERT INTO transactions (project_id, milestone_id, sender_id, receiver_id, amount, type, status, funding_source, complete_at)
+       VALUES ($1, $2, $3, $4, $5, 'escrow_release', 'completed', 'escrow', CURRENT_TIMESTAMP) RETURNING *;`,
+      [milestone.project_id, milestone.id, milestone.client_id, milestone.expert_id, milestone.amount]
     );
     const transaction = transactionRes.rows[0];
 

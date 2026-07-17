@@ -185,6 +185,7 @@ CREATE TABLE transactions (
     receiver_id UUID REFERENCES users(id),
     proposal_id UUID REFERENCES proposals(id),
     invitation_id UUID REFERENCES invitations(id),
+    milestone_id UUID REFERENCES milestones(id),
     funding_source VARCHAR(20) DEFAULT 'card',
     wallet_amount NUMERIC(10, 2) DEFAULT 0,
     external_amount NUMERIC(10, 2) DEFAULT 0,
@@ -251,5 +252,6 @@ CREATE INDEX idx_messages_conversation ON messages(conversation_id);
 CREATE INDEX idx_email_verification_email ON email_verification_codes(email);
 CREATE UNIQUE INDEX idx_transactions_funded_proposal ON transactions(proposal_id) WHERE proposal_id IS NOT NULL AND status = 'completed';
 CREATE UNIQUE INDEX idx_transactions_funded_invitation ON transactions(invitation_id) WHERE invitation_id IS NOT NULL AND status = 'completed';
+CREATE UNIQUE INDEX idx_transactions_released_milestone ON transactions(milestone_id) WHERE milestone_id IS NOT NULL AND type = 'escrow_release' AND status = 'completed';
 CREATE UNIQUE INDEX idx_projects_proposal ON projects(proposal_id) WHERE proposal_id IS NOT NULL;
 CREATE UNIQUE INDEX idx_projects_invitation ON projects(invitation_id) WHERE invitation_id IS NOT NULL;
