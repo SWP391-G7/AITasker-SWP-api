@@ -12,6 +12,8 @@ const {
   submitDeliverable,
   approveDeliverable,
   requestRevision,
+  requestDeadlineExtension,
+  respondDeadlineExtension,
   payMilestone,
   approveMilestone,
   declineMilestone,
@@ -37,6 +39,8 @@ router.put('/:id/start',               startMilestone);
 router.put('/:id/submit-deliverable',   submitDeliverable);
 router.put('/:id/approve-deliverable',  approveDeliverable);
 router.put('/:id/request-revision',     requestRevision);
+router.put('/:id/request-extension',    requestDeadlineExtension);
+router.put('/:id/respond-extension',    respondDeadlineExtension);
 router.put('/:id/pay',                  payMilestone);
 router.put('/:id/approve',              approveMilestone);
 router.put('/:id/decline',              declineMilestone);

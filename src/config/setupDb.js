@@ -221,6 +221,11 @@ async function initDatabase() {
     await client.query('ALTER TABLE milestones ADD COLUMN IF NOT EXISTS late_days INTEGER DEFAULT 0;');
     await client.query('ALTER TABLE milestones ADD COLUMN IF NOT EXISTS penalty_amount NUMERIC(10, 2) DEFAULT 0;');
     await client.query('ALTER TABLE milestones ADD COLUMN IF NOT EXISTS released_amount NUMERIC(10, 2);');
+    await client.query('ALTER TABLE milestones ADD COLUMN IF NOT EXISTS extension_requested_days INTEGER DEFAULT 0;');
+    await client.query('ALTER TABLE milestones ADD COLUMN IF NOT EXISTS extension_reason TEXT;');
+    await client.query('ALTER TABLE milestones ADD COLUMN IF NOT EXISTS extension_status VARCHAR(20);');
+    await client.query('ALTER TABLE milestones ADD COLUMN IF NOT EXISTS extension_requested_at TIMESTAMP;');
+    await client.query('ALTER TABLE milestones ADD COLUMN IF NOT EXISTS extension_response_note TEXT;');
     console.log('Milestone lifecycle columns added.');
 
     // Add new project_status enum values

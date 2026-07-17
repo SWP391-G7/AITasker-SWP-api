@@ -178,6 +178,11 @@ CREATE TABLE milestones (
     late_days INTEGER DEFAULT 0,
     penalty_amount NUMERIC(10, 2) DEFAULT 0,
     released_amount NUMERIC(10, 2),
+    extension_requested_days INTEGER DEFAULT 0,
+    extension_reason TEXT,
+    extension_status VARCHAR(20),
+    extension_requested_at TIMESTAMP,
+    extension_response_note TEXT,
     response TEXT DEFAULT NULL,
     deliverable BOOLEAN DEFAULT false
 );

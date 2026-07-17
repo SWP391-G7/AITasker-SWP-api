@@ -766,6 +766,146 @@ const approveDeliverable = async (req, res, next) => {
   }
 };
 
+/** Expert requests extra time for a milestone that is already in progress. */
+const requestDeadlineExtension = async (req, res, next) => {
+  const { id } = req.params;
+  const userId = req.user.id;
+  const userRole = req.user.role;
+  const additionalDays = parseInt(req.body?.additional_days, 10);
+  const reason = String(req.body?.reason || '').trim();
+
+  try {
+    if (!Number.isInteger(additionalDays) || additionalDays < 1 || additionalDays > 90) {
+      const err = new Error('Additional days must be an integer between 1 and 90');
+      err.statusCode = 400;
+      return next(err);
+    }
+    if (reason.length < 10) {
+      const err = new Error('Please provide a reason of at least 10 characters');
+      err.statusCode = 400;
+      return next(err);
+    }
+    const milestoneRes = await pool.query(
+      'SELECT m.*, p.expert_id, p.client_id FROM milestones m JOIN projects p ON p.id = m.project_id WHERE m.id = $1',
+      [id]
+    );
+    if (!milestoneRes.rows.length) {
+      const err = new Error('Milestone not found');
+      err.statusCode = 404;
+      return next(err);
+    }
+    const milestone = milestoneRes.rows[0];
+    if (milestone.expert_id !== userId && userRole !== 'admin') {
+      const err = new Error('Forbidden: Only the assigned expert can request an extension');
+      err.statusCode = 403;
+      return next(err);
+    }
+    if (!['ongoing', 'revision_requested'].includes(milestone.status)) {
+      const err = new Error('An extension can only be requested while the milestone is in progress');
+      err.statusCode = 400;
+      return next(err);
+    }
+    if (milestone.extension_status === 'pending') {
+      const err = new Error('An extension request is already awaiting client review');
+      err.statusCode = 409;
+      return next(err);
+    }
+    const result = await pool.query(
+      `UPDATE milestones SET extension_requested_days = $1, extension_reason = $2,
+       extension_status = 'pending', extension_requested_at = CURRENT_TIMESTAMP,
+       extension_response_note = NULL WHERE id = $3 RETURNING *`,
+      [additionalDays, reason, id]
+    );
+    try {
+      await sendNotification(milestone.client_id, {
+        title: 'Milestone Extension Requested',
+        message: `The expert requested ${additionalDays} extra day(s) for "${milestone.title}".`,
+        type: 'milestone_submitted',
+        referenceId: id
+      });
+    } catch (notificationError) {
+      console.error('[Notification Trigger Error] requestDeadlineExtension:', notificationError.message);
+    }
+    return res.status(200).json({ success: true, milestone: result.rows[0] });
+  } catch (error) {
+    return next(error);
+  }
+};
+
+/** Client approves or rejects an expert's deadline extension request. */
+const respondDeadlineExtension = async (req, res, next) => {
+  const { id } = req.params;
+  const userId = req.user.id;
+  const userRole = req.user.role;
+  const action = String(req.body?.action || '').toLowerCase();
+  const note = String(req.body?.note || '').trim();
+  let dbClient;
+
+  try {
+    if (!['approve', 'reject'].includes(action)) {
+      const err = new Error('Action must be approve or reject');
+      err.statusCode = 400;
+      return next(err);
+    }
+    dbClient = await pool.connect();
+    await dbClient.query('BEGIN');
+    const milestoneRes = await dbClient.query(
+      `SELECT m.*, p.client_id, p.expert_id FROM milestones m
+       JOIN projects p ON p.id = m.project_id WHERE m.id = $1 FOR UPDATE OF m`,
+      [id]
+    );
+    if (!milestoneRes.rows.length) {
+      const err = new Error('Milestone not found');
+      err.statusCode = 404;
+      throw err;
+    }
+    const milestone = milestoneRes.rows[0];
+    if (milestone.client_id !== userId && userRole !== 'admin') {
+      const err = new Error('Forbidden: Only the project client can respond to an extension request');
+      err.statusCode = 403;
+      throw err;
+    }
+    if (milestone.extension_status !== 'pending') {
+      const err = new Error('No pending extension request found');
+      err.statusCode = 400;
+      throw err;
+    }
+    const days = parseInt(milestone.extension_requested_days, 10);
+    let result;
+    if (action === 'approve') {
+      result = await dbClient.query(
+        `UPDATE milestones SET deadline = deadline + ($1 * INTERVAL '1 day'),
+         delivery_days = delivery_days + $1, extension_status = 'approved', extension_response_note = $2
+         WHERE id = $3 RETURNING *`,
+        [days, note || null, id]
+      );
+      await dbClient.query('UPDATE projects SET duration_days = COALESCE(duration_days, 0) + $1 WHERE id = $2', [days, milestone.project_id]);
+    } else {
+      result = await dbClient.query(
+        "UPDATE milestones SET extension_status = 'rejected', extension_response_note = $1 WHERE id = $2 RETURNING *",
+        [note || null, id]
+      );
+    }
+    await dbClient.query('COMMIT');
+    try {
+      await sendNotification(milestone.expert_id, {
+        title: action === 'approve' ? 'Milestone Extension Approved' : 'Milestone Extension Rejected',
+        message: `Your ${days}-day extension request for "${milestone.title}" was ${action === 'approve' ? 'approved' : 'rejected'}.`,
+        type: action === 'approve' ? 'milestone_approved' : 'milestone_rejected',
+        referenceId: id
+      });
+    } catch (notificationError) {
+      console.error('[Notification Trigger Error] respondDeadlineExtension:', notificationError.message);
+    }
+    return res.status(200).json({ success: true, action, milestone: result.rows[0] });
+  } catch (error) {
+    if (dbClient) await dbClient.query('ROLLBACK');
+    return next(error);
+  } finally {
+    if (dbClient) dbClient.release();
+  }
+};
+
 /**
  * @desc    Request revision on a submitted deliverable (submitted → revision_requested)
  * @route   PUT /api/milestones/:id/request-revision
@@ -1317,6 +1457,8 @@ module.exports = {
   submitDeliverable,
   approveDeliverable,
   requestRevision,
+  requestDeadlineExtension,
+  respondDeadlineExtension,
   payMilestone,
   approveMilestone,
   declineMilestone,
