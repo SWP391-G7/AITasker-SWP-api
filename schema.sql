@@ -84,7 +84,8 @@ CREATE TABLE invitations (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     client_id UUID NOT NULL REFERENCES client_profiles(id) ON DELETE CASCADE,
     service_id UUID NOT NULL REFERENCES services(id) ON DELETE CASCADE,
-    is_approved BOOLEAN DEFAULT false
+    is_approved BOOLEAN DEFAULT false,
+    payment_status VARCHAR(20) DEFAULT 'unpaid'
 );
 
 -- 6. JOB POST TABLE
@@ -114,7 +115,8 @@ CREATE TABLE proposals (
     bid_amount NUMERIC(10, 2) NOT NULL,
     delivery_days INT NOT NULL,
     status proposal_status DEFAULT 'pending',
-    ai_match_score REAL
+    ai_match_score REAL,
+    payment_status VARCHAR(20) DEFAULT 'unpaid'
 );
 
 -- 8. AI LOG TABLE
@@ -135,6 +137,8 @@ CREATE TABLE projects (
     type project_type NOT NULL,
     status project_status DEFAULT 'active',
     total_amount NUMERIC(10, 2) NOT NULL,
+    proposal_id UUID REFERENCES proposals(id),
+    invitation_id UUID REFERENCES invitations(id),
     deliverable BOOLEAN DEFAULT false,
     start_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     end_date TIMESTAMP
@@ -179,6 +183,11 @@ CREATE TABLE transactions (
     project_id UUID REFERENCES projects(id),
     sender_id UUID REFERENCES users(id),
     receiver_id UUID REFERENCES users(id),
+    proposal_id UUID REFERENCES proposals(id),
+    invitation_id UUID REFERENCES invitations(id),
+    funding_source VARCHAR(20) DEFAULT 'card',
+    wallet_amount NUMERIC(10, 2) DEFAULT 0,
+    external_amount NUMERIC(10, 2) DEFAULT 0,
     amount NUMERIC(10, 2) NOT NULL,
     type transaction_type NOT NULL,
     discount VARCHAR(50), -- Map database flexible placeholder
@@ -240,3 +249,7 @@ CREATE INDEX idx_services_expert ON services(expert_id);
 CREATE INDEX idx_proposals_job ON proposals(job_id);
 CREATE INDEX idx_messages_conversation ON messages(conversation_id);
 CREATE INDEX idx_email_verification_email ON email_verification_codes(email);
+CREATE UNIQUE INDEX idx_transactions_funded_proposal ON transactions(proposal_id) WHERE proposal_id IS NOT NULL AND status = 'completed';
+CREATE UNIQUE INDEX idx_transactions_funded_invitation ON transactions(invitation_id) WHERE invitation_id IS NOT NULL AND status = 'completed';
+CREATE UNIQUE INDEX idx_projects_proposal ON projects(proposal_id) WHERE proposal_id IS NOT NULL;
+CREATE UNIQUE INDEX idx_projects_invitation ON projects(invitation_id) WHERE invitation_id IS NOT NULL;

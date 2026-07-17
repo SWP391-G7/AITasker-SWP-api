@@ -354,23 +354,8 @@ const updateInvitationStatus = async (req, res, next) => {
     let createdProject = null
 
     if (status === 'accepted') {
-      // If client is accepting, auto-create the project immediately
-      // If expert is accepting, it remains pending/accepted until client hits startProject
-      if (isClient && start_project !== false) {
-        const insertProjectQuery = `
-          INSERT INTO projects (expert_id, client_id, type, status, total_amount, title, description)
-          VALUES ($1, $2, 'fixed_milestone', 'Planning', $3, $4, $5)
-          RETURNING *;
-        `
-        const projectRes = await pool.query(insertProjectQuery, [
-          invitation.expert_id,
-          invitation.client_id,
-          finalBidAmount,
-          invitation.service_title,
-          invitation.cover_letter || invitation.service_description
-        ])
-        createdProject = projectRes.rows[0]
-      }
+      // Accepting only confirms the terms. Escrow funding is required before
+      // the client can create a project, regardless of who clicked Accept.
     }
 
     await pool.query('COMMIT')
@@ -574,20 +559,20 @@ const startProject = async (req, res, next) => {
       return next(err)
     }
 
-    // Require payment to have been made before project creation
-    if (!invitation.paid_at) {
-      const err = new Error('Cannot start project: Payment must be completed first. Please fund the escrow.')
+    // Support both the new funded marker and the paid_at marker introduced by
+    // the existing services-test payment flow.
+    if (invitation.payment_status !== 'funded' && !invitation.paid_at) {
+      const err = new Error('Cannot start project: Client payment has not been secured in escrow')
       err.statusCode = 400
       return next(err)
     }
-
 
     await pool.query('BEGIN')
 
     // Create the project
     const insertProjectQuery = `
-      INSERT INTO projects (expert_id, client_id, type, status, total_amount, title, description)
-      VALUES ($1, $2, 'fixed_milestone', 'Planning', $3, $4, $5)
+      INSERT INTO projects (expert_id, client_id, type, status, total_amount, title, description, invitation_id)
+      VALUES ($1, $2, 'fixed_milestone', 'Planning', $3, $4, $5, $6)
       RETURNING *;
     `
     const projectRes = await pool.query(insertProjectQuery, [
@@ -595,9 +580,15 @@ const startProject = async (req, res, next) => {
       invitation.client_id,
       invitation.bid_amount,
       invitation.service_title,
-      invitation.cover_letter || invitation.service_description
+      invitation.cover_letter || invitation.service_description,
+      invitation.id
     ])
     const project = projectRes.rows[0]
+
+    await pool.query(
+      "UPDATE transactions SET project_id = $1 WHERE invitation_id = $2 AND type = 'escrow_deposit' AND status = 'completed'",
+      [project.id, invitation.id]
+    )
 
     // Set invitation status to something complete if needed or keep it accepted. We'll keep it accepted.
     await pool.query('COMMIT')

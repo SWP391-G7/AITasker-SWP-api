@@ -12,6 +12,11 @@ const initiateProposalPayment = async (req, res, next) => {
   const userId = req.user.id;
   const userRole = req.user.role;
   const { proposalId } = req.params;
+  const paymentSource = req.body.payment_source || 'card';
+
+  if (!['card', 'wallet', 'combined'].includes(paymentSource)) {
+    return res.status(400).json({ success: false, message: 'payment_source must be card, wallet, or combined' });
+  }
 
   if (userRole !== 'client' && userRole !== 'admin') {
     const err = new Error('Forbidden: Only clients can initiate proposal payments');
@@ -53,7 +58,7 @@ const initiateProposalPayment = async (req, res, next) => {
     }
 
     // Verify proposal is pending or countered
-    if (proposal.status !== 'pending' && proposal.status !== 'countered') {
+    if (!['pending', 'countered', 'accepted'].includes(proposal.status)) {
       const err = new Error(`Cannot accept proposal with status: ${proposal.status}`);
       err.statusCode = 400;
       return next(err);
@@ -65,13 +70,22 @@ const initiateProposalPayment = async (req, res, next) => {
       bidAmount = parseFloat(proposal.counter_bid_amount);
     }
 
-    // Verify client budget
+    if (proposal.payment_status === 'funded') {
+      const err = new Error('This proposal has already been funded');
+      err.statusCode = 409;
+      return next(err);
+    }
+
+    // Allocate the payable amount between available wallet credit and card.
+    // Locked escrow is never included in client_profiles.budget.
     const clientBudget = parseFloat(proposal.client_budget || 0);
-    if (clientBudget < bidAmount) {
-      const err = new Error('Your budget is not enough to choose this proposal');
+    if (paymentSource === 'wallet' && clientBudget < bidAmount) {
+      const err = new Error('Available wallet balance is not enough for this payment');
       err.statusCode = 400;
       return next(err);
     }
+    const walletAmount = paymentSource === 'card' ? 0 : Math.min(clientBudget, bidAmount);
+    const cardAmount = bidAmount - walletAmount;
 
     // Generate self-contained temporary token (expires in 15 minutes)
     const tokenPayload = {
@@ -79,7 +93,11 @@ const initiateProposalPayment = async (req, res, next) => {
       clientId: proposal.client_id,
       amount: bidAmount,
       jobId: proposal.job_id,
-      jobTitle: proposal.job_title
+      jobTitle: proposal.job_title,
+      paymentSource,
+      walletAmount,
+      cardAmount,
+      paymentKind: 'proposal'
     };
     
     const token = jwt.sign(
@@ -96,9 +114,57 @@ const initiateProposalPayment = async (req, res, next) => {
       redirectUrl,
       token,
       amount: bidAmount,
+      availableBalance: clientBudget,
+      walletAmount,
+      cardAmount,
+      paymentSource,
       jobTitle: proposal.job_title
     });
 
+  } catch (error) {
+    return next(error);
+  }
+};
+
+const initiateInvitationPayment = async (req, res, next) => {
+  const userId = req.user.id;
+  const userRole = req.user.role;
+  const { invitationId } = req.params;
+  const paymentSource = req.body.payment_source || 'card';
+  if (userRole !== 'client' && userRole !== 'admin') return res.status(403).json({ success: false, message: 'Only clients can fund service requests' });
+  if (!['card', 'wallet', 'combined'].includes(paymentSource)) return res.status(400).json({ success: false, message: 'payment_source must be card, wallet, or combined' });
+
+  try {
+    const result = await pool.query(`
+      SELECT i.*, s.expert_id, s.title AS service_title, cp.budget AS client_budget
+      FROM invitations i
+      JOIN services s ON i.service_id = s.id
+      JOIN client_profiles cp ON i.client_id = cp.id
+      WHERE i.id = $1`, [invitationId]);
+    if (!result.rows.length) return res.status(404).json({ success: false, message: 'Service request not found' });
+    const invitation = result.rows[0];
+    if (invitation.client_id !== userId && userRole !== 'admin') return res.status(403).json({ success: false, message: 'You can only fund your own service request' });
+    if (invitation.status !== 'accepted') return res.status(400).json({ success: false, message: 'The service request terms must be accepted before payment' });
+    if (invitation.payment_status === 'funded') return res.status(409).json({ success: false, message: 'This service request has already been funded' });
+
+    const amount = parseFloat(invitation.bid_amount || 0);
+    const availableBalance = parseFloat(invitation.client_budget || 0);
+    if (paymentSource === 'wallet' && availableBalance < amount) return res.status(400).json({ success: false, message: 'Available wallet balance is not enough for this payment' });
+    const walletAmount = paymentSource === 'card' ? 0 : Math.min(availableBalance, amount);
+    const cardAmount = amount - walletAmount;
+    const token = jwt.sign({
+      invitationId: invitation.id,
+      clientId: invitation.client_id,
+      expertId: invitation.expert_id,
+      amount,
+      paymentSource,
+      walletAmount,
+      cardAmount,
+      paymentKind: 'invitation',
+      serviceTitle: invitation.service_title
+    }, process.env.JWT_SECRET || 'aitasker-super-secret-key-2026', { expiresIn: '15m' });
+
+    return res.status(200).json({ success: true, redirectUrl: `/mock-payment-gateway/${token}`, token, amount, availableBalance, walletAmount, cardAmount, paymentSource, serviceTitle: invitation.service_title });
   } catch (error) {
     return next(error);
   }
@@ -124,32 +190,34 @@ const mockChargeCard = async (req, res, next) => {
     return res.status(400).json({ success: false, message: 'Invalid or expired payment session token' });
   }
 
-  // Validate card format
+  const cardAmount = parseFloat(payload.cardAmount ?? payload.amount);
+
+  // Validate card details only when an external charge is required.
   const sanitizedCard = (cardNumber || '').replace(/\s/g, '');
-  if (!sanitizedCard || sanitizedCard.length !== 16 || isNaN(sanitizedCard)) {
+  if (cardAmount > 0 && (!sanitizedCard || sanitizedCard.length !== 16 || isNaN(sanitizedCard))) {
     return res.status(400).json({ success: false, message: 'Card number must be 16 digits' });
   }
 
-  if (!cardHolder || cardHolder.trim() === '') {
+  if (cardAmount > 0 && (!cardHolder || cardHolder.trim() === '')) {
     return res.status(400).json({ success: false, message: 'Cardholder name is required' });
   }
 
-  if (!expiry || !/^\d{2}\/\d{2}$/.test(expiry)) {
+  if (cardAmount > 0 && (!expiry || !/^\d{2}\/\d{2}$/.test(expiry))) {
     return res.status(400).json({ success: false, message: 'Expiry date must be MM/YY' });
   }
 
-  if (!cvv || cvv.length !== 3 || isNaN(cvv)) {
+  if (cardAmount > 0 && (!cvv || cvv.length !== 3 || isNaN(cvv))) {
     return res.status(400).json({ success: false, message: 'CVV must be 3 digits' });
   }
 
   // Handle mock failure conditions
-  if (cvv === '999') {
+  if (cardAmount > 0 && cvv === '999') {
     const errorMsg = 'Payment details invalid: Suspected fraud / Card declined.';
     console.error(`[Mock 3rd Party Payment Error] Fraud trigger CVV=999. Card: ${sanitizedCard}. Name: ${cardHolder}`);
     return res.status(400).json({ success: false, message: errorMsg });
   }
 
-  if (sanitizedCard === '4111111111111111') {
+  if (cardAmount > 0 && sanitizedCard === '4111111111111111') {
     const errorMsg = 'Payment details invalid: Insufficient funds.';
     console.error(`[Mock 3rd Party Payment Error] Insufficient funds trigger. Card: ${sanitizedCard}`);
     return res.status(400).json({ success: false, message: errorMsg });
@@ -163,7 +231,11 @@ const mockChargeCard = async (req, res, next) => {
     clientId: payload.clientId,
     expertId: payload.expertId,
     amount: payload.amount,
-    jobId: payload.jobId
+    jobId: payload.jobId,
+    paymentSource: payload.paymentSource || 'card',
+    walletAmount: parseFloat(payload.walletAmount || 0),
+    cardAmount,
+    paymentKind: payload.paymentKind || 'proposal'
   };
 
   const webhookSecret = process.env.MOCK_PAYMENT_WEBHOOK_SECRET || 'mock-payment-webhook-secret';
@@ -204,7 +276,9 @@ const mockChargeCard = async (req, res, next) => {
           return res.status(200).json({
             success: true,
             message: 'Payment charged and escrowed successfully',
-            redirectUrl
+            redirectUrl: (payload.paymentKind === 'invitation' || payload.type === 'invitation')
+              ? `/service-requests/${payload.invitationId}?payment=success`
+              : `/client/projects/${payload.jobId}?payment=success&proposalId=${payload.proposalId}`
           });
         } else {
           return res.status(webhookRes.statusCode || 500).json({
@@ -256,91 +330,70 @@ const handlePaymentWebhook = async (req, res, next) => {
   }
 
   const { type, proposalId, invitationId, clientId, expertId: webhookExpertId, amount, jobId } = webhookPayload;
+  const numericAmount = parseFloat(amount);
+  const numericWalletAmount = parseFloat(webhookPayload.walletAmount || 0);
+  const numericCardAmount = parseFloat(webhookPayload.cardAmount || 0);
+  if (![numericAmount, numericWalletAmount, numericCardAmount].every(Number.isFinite) ||
+      numericAmount <= 0 || numericWalletAmount < 0 || numericCardAmount < 0 ||
+      Math.abs(numericWalletAmount + numericCardAmount - numericAmount) > 0.01) {
+    return res.status(400).json({ success: false, message: 'Invalid payment allocation' });
+  }
   const dbClient = await pool.connect();
 
   try {
     await dbClient.query('BEGIN');
 
-    // ── INVITATION PAYMENT FLOW ──────────────────────────────────────
-    if (type === 'invitation') {
-      // 1. Verify invitation is accepted (expert approved) and not yet paid
-      const invRes = await dbClient.query(
-        `SELECT i.*, s.expert_id, s.title as service_title
+    if (webhookPayload.paymentKind === 'invitation' || type === 'invitation') {
+      const targetInvitationId = webhookPayload.invitationId || invitationId;
+      const invitationRes = await dbClient.query(
+        `SELECT i.status, i.payment_status, i.paid_at, i.bid_amount, s.expert_id
          FROM invitations i JOIN services s ON i.service_id = s.id
-         WHERE i.id = $1 FOR UPDATE`,
-        [invitationId]
+         WHERE i.id = $1 FOR UPDATE OF i`,
+        [targetInvitationId]
       );
-      if (invRes.rows.length === 0) throw new Error('Precondition failed: Invitation not found');
-      const inv = invRes.rows[0];
-      if (inv.status !== 'accepted') throw new Error(`Precondition failed: Invitation status must be accepted, got ${inv.status}`);
-      if (inv.paid_at) throw new Error('Precondition failed: This invitation has already been paid');
+      if (!invitationRes.rows.length) throw new Error('Precondition failed: Service request not found');
+      const invitation = invitationRes.rows[0];
+      if (invitation.status !== 'accepted') throw new Error('Precondition failed: Service request terms are not accepted');
+      if (invitation.payment_status === 'funded' || invitation.paid_at) throw new Error('Precondition failed: Service request is already funded');
 
-      const expertId = inv.expert_id;
-      const serviceTitle = inv.service_title;
-
-      // 2. Client budget check
       const clientRes = await dbClient.query('SELECT budget FROM client_profiles WHERE id = $1 FOR UPDATE', [clientId]);
-      if (clientRes.rows.length === 0) throw new Error('Precondition failed: Client profile not found');
-      const clientBudget = parseFloat(clientRes.rows[0].budget || 0);
-      if (clientBudget < parseFloat(amount)) throw new Error('Precondition failed: Client has insufficient budget');
+      const walletAmount = parseFloat(webhookPayload.walletAmount || 0);
+      const cardAmount = parseFloat(webhookPayload.cardAmount ?? amount);
+      if (!clientRes.rows.length || parseFloat(clientRes.rows[0].budget || 0) < walletAmount) throw new Error('Precondition failed: Available wallet balance is insufficient');
 
-      // A. Deduct client budget
-      await dbClient.query('UPDATE client_profiles SET budget = budget - $1 WHERE id = $2', [amount, clientId]);
-
-      // B. Mark invitation as paid (set paid_at timestamp; status stays 'accepted')
-      await dbClient.query('UPDATE invitations SET paid_at = CURRENT_TIMESTAMP WHERE id = $1', [invitationId]);
-
-      // C. Save transaction record
+      await dbClient.query('UPDATE client_profiles SET budget = budget - $1 WHERE id = $2', [walletAmount, clientId]);
+      await dbClient.query("UPDATE invitations SET payment_status = 'funded', paid_at = CURRENT_TIMESTAMP WHERE id = $1", [targetInvitationId]);
       const txRes = await dbClient.query(`
-        INSERT INTO transactions (sender_id, receiver_id, amount, type, status, complete_at)
-        VALUES ($1, $2, $3, 'escrow_deposit', 'completed', CURRENT_TIMESTAMP)
-        RETURNING id;
-      `, [clientId, expertId, amount]);
-      const transactionId = txRes.rows[0].id;
-
-      // D. Save payment record
-      await dbClient.query(`
-        INSERT INTO payments (transaction_id, user_id, amount, type, paid_at)
-        VALUES ($1, $2, $3, 'credit_card', CURRENT_TIMESTAMP);
-      `, [transactionId, clientId, amount]);
-
-      await dbClient.query('COMMIT');
-
-      // Notify expert that payment was received
-      try {
-        const { sendNotification } = require('../utils/notificationService');
-        await sendNotification(expertId, {
-          title: 'Service Request Paid',
-          message: `The client has completed payment for the service request "${serviceTitle}". The project can now be started.`,
-          type: 'service_request_paid',
-          referenceId: invitationId
-        });
-      } catch (notifErr) {
-        console.error('[Notification Trigger Error] handlePaymentWebhook (invitation):', notifErr.message);
+        INSERT INTO transactions (sender_id, receiver_id, invitation_id, amount, type, status, funding_source, wallet_amount, external_amount, complete_at)
+        VALUES ($1, $2, $3, $4, 'escrow_deposit', 'completed', $5, $6, $7, CURRENT_TIMESTAMP)
+        RETURNING id`, [clientId, invitation.expert_id, targetInvitationId, amount, webhookPayload.paymentSource || 'card', walletAmount, cardAmount]);
+      if (cardAmount > 0) {
+        await dbClient.query("INSERT INTO payments (transaction_id, user_id, amount, type, paid_at) VALUES ($1, $2, $3, 'credit_card', CURRENT_TIMESTAMP)", [txRes.rows[0].id, clientId, cardAmount]);
       }
-
-      return res.status(200).json({ success: true, message: 'Invitation payment processed successfully.' });
+      await dbClient.query('COMMIT');
+      return res.status(200).json({ success: true, message: 'Service request funded successfully' });
     }
 
-    // ── PROPOSAL PAYMENT FLOW (default) ─────────────────────────────
+    // Re-verify Preconditions inside SQL locks
     // 1. Job post is open
     const jobRes = await dbClient.query('SELECT status, title FROM job_posts WHERE id = $1 FOR UPDATE', [jobId]);
     if (jobRes.rows.length === 0) {
       throw new Error('Precondition failed: Job post not found');
     }
-    if (jobRes.rows[0].status !== 'open') {
-      throw new Error('Precondition failed: Job post status must be open');
+    if (!['open', 'pending'].includes(jobRes.rows[0].status)) {
+      throw new Error('Precondition failed: Job post must be open or awaiting payment');
     }
     const jobTitle = jobRes.rows[0].title;
 
     // 2. Selected proposal is pending or countered
-    const proposalRes = await dbClient.query('SELECT status, expert_id FROM proposals WHERE id = $1 FOR UPDATE', [proposalId]);
+    const proposalRes = await dbClient.query('SELECT status, expert_id, payment_status FROM proposals WHERE id = $1 FOR UPDATE', [proposalId]);
     if (proposalRes.rows.length === 0) {
       throw new Error('Precondition failed: Proposal not found');
     }
-    if (proposalRes.rows[0].status !== 'pending' && proposalRes.rows[0].status !== 'countered') {
-      throw new Error(`Precondition failed: Proposal status must be pending or countered, got ${proposalRes.rows[0].status}`);
+    if (!['pending', 'countered', 'accepted'].includes(proposalRes.rows[0].status)) {
+      throw new Error(`Precondition failed: Proposal cannot be funded from status ${proposalRes.rows[0].status}`);
     }
+    if (proposalRes.rows[0].payment_status === 'funded') throw new Error('Precondition failed: Proposal is already funded');
     const expertId = proposalRes.rows[0].expert_id;
 
     // 3. Client budget >= proposal budget
@@ -349,16 +402,18 @@ const handlePaymentWebhook = async (req, res, next) => {
       throw new Error('Precondition failed: Client profile not found');
     }
     const clientBudget = parseFloat(clientRes.rows[0].budget || 0);
-    if (clientBudget < parseFloat(amount)) {
-      throw new Error('Precondition failed: Client has insufficient budget');
+    const walletAmount = parseFloat(webhookPayload.walletAmount || 0);
+    const cardAmount = parseFloat(webhookPayload.cardAmount ?? amount);
+    if (clientBudget < walletAmount) {
+      throw new Error('Precondition failed: Available wallet balance changed and is now insufficient');
     }
 
     // Execute Postconditions
     // A. Client budget decreases
-    await dbClient.query('UPDATE client_profiles SET budget = budget - $1 WHERE id = $2', [amount, clientId]);
+    await dbClient.query('UPDATE client_profiles SET budget = budget - $1 WHERE id = $2', [walletAmount, clientId]);
 
     // B. Status of selected proposal changes to "Accepted"
-    await dbClient.query('UPDATE proposals SET status = \'accepted\', bid_amount = $1 WHERE id = $2', [amount, proposalId]);
+    await dbClient.query("UPDATE proposals SET status = 'accepted', payment_status = 'funded', bid_amount = $1 WHERE id = $2", [amount, proposalId]);
 
     // C. Status of remaining proposals changes to "Rejected"
     await dbClient.query('UPDATE proposals SET status = \'rejected\' WHERE job_id = $1 AND id <> $2', [jobId, proposalId]);
@@ -368,17 +423,19 @@ const handlePaymentWebhook = async (req, res, next) => {
 
     // E. Save transaction record (completed deposit in escrow)
     const transactionRes = await dbClient.query(`
-      INSERT INTO transactions (sender_id, receiver_id, amount, type, status, complete_at)
-      VALUES ($1, $2, $3, 'escrow_deposit', 'completed', CURRENT_TIMESTAMP)
+      INSERT INTO transactions (sender_id, receiver_id, proposal_id, amount, type, status, funding_source, wallet_amount, external_amount, complete_at)
+      VALUES ($1, $2, $3, $4, 'escrow_deposit', 'completed', $5, $6, $7, CURRENT_TIMESTAMP)
       RETURNING id;
-    `, [clientId, expertId, amount]);
+    `, [clientId, expertId, proposalId, amount, webhookPayload.paymentSource || 'card', walletAmount, cardAmount]);
     const transactionId = transactionRes.rows[0].id;
 
     // F. Save payment record
-    await dbClient.query(`
-      INSERT INTO payments (transaction_id, user_id, amount, type, paid_at)
-      VALUES ($1, $2, $3, 'credit_card', CURRENT_TIMESTAMP);
-    `, [transactionId, clientId, amount]);
+    if (cardAmount > 0) {
+      await dbClient.query(`
+        INSERT INTO payments (transaction_id, user_id, amount, type, paid_at)
+        VALUES ($1, $2, $3, 'credit_card', CURRENT_TIMESTAMP);
+      `, [transactionId, clientId, cardAmount]);
+    }
 
     await dbClient.query('COMMIT');
 
@@ -403,105 +460,6 @@ const handlePaymentWebhook = async (req, res, next) => {
     return res.status(400).json({ success: false, message: error.message });
   } finally {
     dbClient.release();
-  }
-};
-
-/**
- * @desc    Initiate payment process for an accepted service-request invitation
- * @route   POST /api/payment/pay-invitation/:invitationId
- * @access  Private (Client only)
- */
-const initiateInvitationPayment = async (req, res, next) => {
-  const userId = req.user.id;
-  const userRole = req.user.role;
-  const { invitationId } = req.params;
-
-  if (userRole !== 'client' && userRole !== 'admin') {
-    const err = new Error('Forbidden: Only clients can initiate invitation payments');
-    err.statusCode = 403;
-    return next(err);
-  }
-
-  try {
-    // Query invitation with service and client budget
-    const invQuery = `
-      SELECT i.*, s.title as service_title, s.expert_id,
-             cp.budget as client_budget
-      FROM invitations i
-      JOIN services s ON i.service_id = s.id
-      JOIN client_profiles cp ON i.client_id = cp.id
-      WHERE i.id = $1;
-    `;
-    const result = await pool.query(invQuery, [invitationId]);
-
-    if (result.rows.length === 0) {
-      const err = new Error('Service request not found');
-      err.statusCode = 404;
-      return next(err);
-    }
-
-    const invitation = result.rows[0];
-
-    // Ownership check
-    if (invitation.client_id !== userId && userRole !== 'admin') {
-      const err = new Error('Forbidden: You can only pay for your own service requests');
-      err.statusCode = 403;
-      return next(err);
-    }
-
-    // Must be accepted by the expert (not yet paid)
-    if (invitation.status !== 'accepted') {
-      const err = new Error(`Cannot pay for a request with status: ${invitation.status}. The expert must accept first.`);
-      err.statusCode = 400;
-      return next(err);
-    }
-
-    // Already paid?
-    if (invitation.paid_at) {
-      const err = new Error('This request has already been paid. You can now start the project.');
-      err.statusCode = 400;
-      return next(err);
-    }
-
-    // Determine the final bid amount
-    const bidAmount = parseFloat(invitation.bid_amount);
-
-    // Budget check
-    const clientBudget = parseFloat(invitation.client_budget || 0);
-    if (clientBudget < bidAmount) {
-      const err = new Error('Your budget is insufficient for this service request');
-      err.statusCode = 400;
-      return next(err);
-    }
-
-    // Build JWT token payload (includes type: 'invitation' to distinguish in webhook)
-    const tokenPayload = {
-      type: 'invitation',
-      invitationId: invitation.id,
-      clientId: invitation.client_id,
-      expertId: invitation.expert_id,
-      amount: bidAmount,
-      jobTitle: invitation.service_title
-    };
-
-    const token = jwt.sign(
-      tokenPayload,
-      process.env.JWT_SECRET || 'aitasker-super-secret-key-2026',
-      { expiresIn: '15m' }
-    );
-
-    const redirectUrl = `/mock-payment-gateway/${token}`;
-
-    return res.status(200).json({
-      success: true,
-      redirectUrl,
-      token,
-      amount: bidAmount,
-      jobTitle: invitation.service_title
-    });
-
-  } catch (error) {
-    return next(error);
   }
 };
 

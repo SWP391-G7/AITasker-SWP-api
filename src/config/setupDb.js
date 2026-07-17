@@ -143,6 +143,8 @@ async function initDatabase() {
     console.log('Ensuring client_profiles and expert_profiles have onboarding columns...');
     await client.query('ALTER TABLE client_profiles ADD COLUMN IF NOT EXISTS company_name VARCHAR(255);');
     await client.query('ALTER TABLE client_profiles ADD COLUMN IF NOT EXISTS industry VARCHAR(255);');
+    await client.query('ALTER TABLE client_profiles ADD COLUMN IF NOT EXISTS budget NUMERIC(10, 2) DEFAULT 10000.00;');
+    await client.query('UPDATE client_profiles SET budget = 10000.00 WHERE budget IS NULL;');
     
     await client.query('ALTER TABLE expert_profiles ADD COLUMN IF NOT EXISTS professional_title VARCHAR(255);');
     await client.query('ALTER TABLE expert_profiles ADD COLUMN IF NOT EXISTS experience VARCHAR(100);');
@@ -258,6 +260,19 @@ async function initDatabase() {
     await client.query('ALTER TABLE invitations ADD COLUMN IF NOT EXISTS counter_cover_letter TEXT;');
     await client.query('ALTER TABLE invitations ADD COLUMN IF NOT EXISTS counter_initiated_by UUID;');
     await client.query('ALTER TABLE invitations ADD COLUMN IF NOT EXISTS paid_at TIMESTAMP DEFAULT NULL;');
+    await client.query("ALTER TABLE proposals ADD COLUMN IF NOT EXISTS payment_status VARCHAR(20) DEFAULT 'unpaid';");
+    await client.query("ALTER TABLE invitations ADD COLUMN IF NOT EXISTS payment_status VARCHAR(20) DEFAULT 'unpaid';");
+    await client.query('ALTER TABLE transactions ADD COLUMN IF NOT EXISTS proposal_id UUID;');
+    await client.query('ALTER TABLE transactions ADD COLUMN IF NOT EXISTS invitation_id UUID;');
+    await client.query("ALTER TABLE transactions ADD COLUMN IF NOT EXISTS funding_source VARCHAR(20) DEFAULT 'card';");
+    await client.query('ALTER TABLE transactions ADD COLUMN IF NOT EXISTS wallet_amount NUMERIC(10, 2) DEFAULT 0;');
+    await client.query('ALTER TABLE transactions ADD COLUMN IF NOT EXISTS external_amount NUMERIC(10, 2) DEFAULT 0;');
+    await client.query('ALTER TABLE projects ADD COLUMN IF NOT EXISTS proposal_id UUID;');
+    await client.query('ALTER TABLE projects ADD COLUMN IF NOT EXISTS invitation_id UUID;');
+    await client.query('CREATE UNIQUE INDEX IF NOT EXISTS idx_transactions_funded_proposal ON transactions(proposal_id) WHERE proposal_id IS NOT NULL AND status = \'completed\';');
+    await client.query('CREATE UNIQUE INDEX IF NOT EXISTS idx_transactions_funded_invitation ON transactions(invitation_id) WHERE invitation_id IS NOT NULL AND status = \'completed\';');
+    await client.query('CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_proposal ON projects(proposal_id) WHERE proposal_id IS NOT NULL;');
+    await client.query('CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_invitation ON projects(invitation_id) WHERE invitation_id IS NOT NULL;');
     console.log('Invitations table columns checked/added successfully.');
     // Ensure users table has acc_status column
     console.log('Ensuring users table has "acc_status" column...');

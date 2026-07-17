@@ -505,40 +505,9 @@ const updateProposalStatus = async (req, res, next) => {
 
     let createdProject = null;
 
-    // 5. If status is accepted, handle job status and project creation
+    // Acceptance confirms terms only; funding and project creation are separate.
     if (status === 'accepted') {
-      if (start_project === false || isExpert) {
-        // Expert approving → job goes to pending; client must click Create Project
-        const updateJobQuery = `
-          UPDATE job_posts
-          SET status = 'pending'
-          WHERE id = $1;
-        `;
-        await pool.query(updateJobQuery, [proposal.job_id]);
-      } else {
-        // Client accepting with immediate start → close job and auto-create project
-        const updateJobQuery = `
-          UPDATE job_posts
-          SET status = 'closed'
-          WHERE id = $1;
-        `;
-        await pool.query(updateJobQuery, [proposal.job_id]);
-
-        // Auto create project
-        const insertProjectQuery = `
-          INSERT INTO projects (expert_id, client_id, type, status, total_amount, title, description)
-          VALUES ($1, $2, 'fixed_milestone', 'active', $3, $4, $5)
-          RETURNING *;
-        `;
-        const projectRes = await pool.query(insertProjectQuery, [
-          proposal.expert_id,
-          proposal.client_id,
-          finalBidAmount,
-          proposal.job_title,
-          proposal.job_description
-        ]);
-        createdProject = projectRes.rows[0];
-      }
+      await pool.query("UPDATE job_posts SET status = 'pending' WHERE id = $1", [proposal.job_id]);
     }
 
     await pool.query('COMMIT');

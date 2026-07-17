@@ -91,13 +91,19 @@ const createProject = async (req, res, next) => {
       return next(err);
     }
 
+    if (proposal.payment_status !== 'funded') {
+      const err = new Error('Cannot start project: Client payment has not been secured in escrow');
+      err.statusCode = 400;
+      return next(err);
+    }
+
     // Start Transaction
     await pool.query('BEGIN');
 
     // 1. Create the project
     const insertQuery = `
-      INSERT INTO projects (expert_id, client_id, type, status, total_amount, title, description)
-      VALUES ($1, $2, 'fixed_milestone', 'Planning', $3, $4, $5)
+      INSERT INTO projects (expert_id, client_id, type, status, total_amount, title, description, proposal_id)
+      VALUES ($1, $2, 'fixed_milestone', 'Planning', $3, $4, $5, $6)
       RETURNING *;
     `;
     const projectValues = [
@@ -105,10 +111,16 @@ const createProject = async (req, res, next) => {
       jobPost.client_id,
       proposal.bid_amount,
       jobPost.title,
-      jobPost.description
+      jobPost.description,
+      proposal.id
     ];
     const projectRes = await pool.query(insertQuery, projectValues);
     const project = projectRes.rows[0];
+
+    await pool.query(
+      'UPDATE transactions SET project_id = $1 WHERE proposal_id = $2 AND type = \'escrow_deposit\' AND status = \'completed\'',
+      [project.id, proposal.id]
+    );
 
     // 2. Set job post status to 'closed' instead of deleting it
     await pool.query(
