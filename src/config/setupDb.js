@@ -208,6 +208,7 @@ async function initDatabase() {
 
     // Add milestone lifecycle columns
     console.log('Adding milestone lifecycle columns...');
+    await client.query('ALTER TABLE milestones ADD COLUMN IF NOT EXISTS content TEXT;');
     await client.query('ALTER TABLE milestones ADD COLUMN IF NOT EXISTS position INTEGER DEFAULT 0;');
     await client.query('ALTER TABLE milestones ADD COLUMN IF NOT EXISTS delivery_days INTEGER;');
     await client.query('ALTER TABLE milestones ADD COLUMN IF NOT EXISTS deadline TIMESTAMP;');
@@ -302,10 +303,34 @@ async function initDatabase() {
         id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
         creator_id UUID REFERENCES users(id) ON DELETE CASCADE,
         target_id UUID REFERENCES users(id) ON DELETE CASCADE,
+        service_id UUID REFERENCES services(id) ON DELETE CASCADE,
         review TEXT,
+        stars INT CHECK(stars >= 1 AND stars <= 5),
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
     `);
+
+    // Add stars column to review table if missing (migration)
+    console.log('Ensuring review table has stars column...');
+    try {
+      await client.query('ALTER TABLE review ADD COLUMN IF NOT EXISTS stars INT CHECK(stars >= 1 AND stars <= 5);');
+    } catch (err) {
+      try {
+        await client.query('ALTER TABLE review ADD COLUMN IF NOT EXISTS stars INT;');
+      } catch (_) {}
+    }
+    console.log('Stars column checked/added successfully.');
+
+    // Add service_id column to review table if missing (migration)
+    console.log('Ensuring review table has service_id column...');
+    try {
+      await client.query('ALTER TABLE review ADD COLUMN IF NOT EXISTS service_id UUID REFERENCES services(id) ON DELETE CASCADE;');
+    } catch (err) {
+      try {
+        await client.query('ALTER TABLE review ADD COLUMN IF NOT EXISTS service_id UUID;');
+      } catch (_) {}
+    }
+    console.log('Service_id column checked/added successfully.');
 
     // Ensure rating column exists in users table
     console.log('Ensuring users table has "rating" column...');

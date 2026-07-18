@@ -87,7 +87,7 @@ const submitMilestonePlan = async (req, res, next) => {
       const row = await pool.query(
         `INSERT INTO milestones
            (project_id, title, content, amount, delivery_days, status, position)
-         VALUES ($1, $2, $3, $4, $5, 'Pending', $6)
+         VALUES ($1, $2, $3, $4, $5, 'planning', $6)
          RETURNING *;`,
         [
           projectId,
@@ -381,7 +381,7 @@ const updateMilestone = async (req, res, next) => {
 
     values.push(id);
     const result = await pool.query(
-      `UPDATE milestones SET ${updates.join(', ')}, status = 'Pending', response = NULL WHERE id = $${idx} RETURNING *;`,
+      `UPDATE milestones SET ${updates.join(', ')}, status = 'planning', response = NULL WHERE id = $${idx} RETURNING *;`,
       values
     );
 
