@@ -734,8 +734,8 @@ const payMilestone = async (req, res, next) => {
       return next(err);
     }
 
-    if (milestone.status !== 'Wait for payment') {
-      const err = new Error('Milestone must be in "Wait for payment" state to pay');
+    if (milestone.status !== 'pending_payment') {
+      const err = new Error('Milestone must be in "Pending Payment" state to pay');
       err.statusCode = 400;
       return next(err);
     }

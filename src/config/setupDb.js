@@ -215,6 +215,8 @@ async function initDatabase() {
     await client.query('ALTER TABLE milestones ADD COLUMN IF NOT EXISTS change_request_note TEXT;');
     await client.query('ALTER TABLE milestones ADD COLUMN IF NOT EXISTS deliverable_url TEXT;');
     await client.query('ALTER TABLE milestones ADD COLUMN IF NOT EXISTS deliverable_note TEXT;');
+    // Normalize old 'Pending' status to 'planning'
+    await client.query("UPDATE milestones SET status = 'planning' WHERE status = 'Pending';");
     console.log('Milestone lifecycle columns added.');
 
     // Add new project_status enum values
