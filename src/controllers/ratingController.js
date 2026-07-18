@@ -123,7 +123,38 @@ const getRatingById = async (req, res, next) => {
   }
 };
 
+/**
+ * @desc    Get average rating by ID
+ * @route   GET /api/ratings/:id/average
+ * @access  Public
+ */
+const getAverageRating = async (req, res, next) => {
+  const { id } = req.params;
+
+  try {
+    const result = await pool.query('SELECT rate_sum, count FROM rating WHERE id = $1;', [id]);
+    
+    if (result.rows.length === 0) {
+      const err = new Error('Rating not found');
+      err.statusCode = 404;
+      return next(err);
+    }
+
+    const { rate_sum, count } = result.rows[0];
+    const averageRating = count > 0 ? (rate_sum / count) : 0;
+
+    return res.status(200).json({
+      success: true,
+      averageRating
+    });
+  } catch (error) {
+    return next(error);
+  }
+};
+
 module.exports = {
   rateTarget,
-  getRatingById
+  getRatingById,
+  getAverageRating
 };
+
