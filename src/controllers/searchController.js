@@ -52,16 +52,25 @@ const searchEntities = async (req, res, next) => {
 
   try {
     if (target === 'jobs') {
-      const includeClosed = req.query.includeClosed === 'true' || req.query.showClosed === 'true';
+      const statusFilter = req.query.status ? req.query.status.toLowerCase() : null;
       queryText = `
         SELECT j.*, c.company_name, u.full_name as client_name, u.avatar_url as client_avatar
         FROM job_posts j
         LEFT JOIN client_profiles c ON j.client_id = c.id
         LEFT JOIN users u ON c.id = u.id
-        WHERE j.status != 'pending' AND j.status != 'removed' AND j.status != 'rejected'
+        WHERE 1=1
       `;
-      if (!includeClosed) {
-        queryText += " AND j.status != 'closed'";
+
+      if (statusFilter === 'rejected' || statusFilter === 'removed') {
+        queryText += " AND (j.status = 'removed' OR j.status = 'rejected')";
+      } else if (statusFilter) {
+        values.push(statusFilter);
+        queryText += ` AND j.status = $${values.length}`;
+      } else {
+        queryText += " AND j.status != 'pending' AND j.status != 'removed' AND j.status != 'rejected'";
+        if (!includeClosed) {
+          queryText += " AND j.status != 'closed'";
+        }
       }
 
       if (query && query.trim() !== '') {

@@ -257,6 +257,7 @@ async function initDatabase() {
     await client.query('ALTER TABLE invitations ADD COLUMN IF NOT EXISTS counter_delivery_days INTEGER;');
     await client.query('ALTER TABLE invitations ADD COLUMN IF NOT EXISTS counter_cover_letter TEXT;');
     await client.query('ALTER TABLE invitations ADD COLUMN IF NOT EXISTS counter_initiated_by UUID;');
+    await client.query('ALTER TABLE invitations ADD COLUMN IF NOT EXISTS paid_at TIMESTAMP DEFAULT NULL;');
     console.log('Invitations table columns checked/added successfully.');
     // Ensure users table has acc_status column
     console.log('Ensuring users table has "acc_status" column...');
@@ -270,7 +271,7 @@ async function initDatabase() {
 
 
     // Add new notification types to notification_type enum if they don't exist
-    const newNotifTypes = ['new_service_request', 'counter_service_request', 'service_request_accepted'];
+    const newNotifTypes = ['new_service_request', 'counter_service_request', 'service_request_accepted', 'service_request_paid'];
     for (const val of newNotifTypes) {
       try {
         await client.query(`ALTER TYPE notification_type ADD VALUE '${val}';`);

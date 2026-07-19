@@ -15,8 +15,8 @@ router.post('/', protect, authorize(['expert']), createService)
 // GET /api/services/my - Get all services created by the current expert
 router.get('/my', protect, authorize(['expert']), getMyServices)
 
-// GET /api/services/:id - Get a single service by ID (all authenticated users)
-router.get('/:id', protect, getServiceById)
+// GET /api/services/:id - Get a single service by ID (public access)
+router.get('/:id', getServiceById)
 
 // PUT /api/services/:id - Update a service (Experts only)
 router.put('/:id', protect, authorize(['expert']), updateService)

@@ -9,8 +9,8 @@ router.post('/', protect, authorize(['client', 'admin']), createJobPost)
 // GET /api/jobs/my - Get all job posts created by the current user
 router.get('/my', protect, authorize(['client', 'admin']), getMyJobs)
 
-// GET /api/jobs/:id - Get a single job post by ID (any authenticated user can view)
-router.get('/:id', protect, getJobById)
+// GET /api/jobs/:id - Get a single job post by ID (public access)
+router.get('/:id', getJobById)
 
 // PUT /api/jobs/:id - Update a job post
 router.put('/:id', protect, authorize(['client', 'admin']), updateJobPost)

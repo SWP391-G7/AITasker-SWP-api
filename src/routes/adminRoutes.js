@@ -8,7 +8,9 @@ const {
   createUser,
   updateUser,
   deleteUser,
-  deactivateUser
+  deactivateUser,
+  getDisputes,
+  resolveDispute
 } = require('../controllers/adminController');
 const { protect, authorize } = require('../middleware/authMiddleware');
 
@@ -18,6 +20,10 @@ router.use(protect, authorize(['admin']));
 // Content Moderation endpoints
 router.get('/content', getAllContent);
 router.put('/content/:contentType/:id/status', setContentStatus);
+
+// Dispute Resolution endpoints
+router.get('/disputes', getDisputes);
+router.post('/disputes/:id/resolve', resolveDispute);
 
 // User Management endpoints
 router.get('/users', getUsers);

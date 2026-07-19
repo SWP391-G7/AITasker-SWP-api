@@ -574,6 +574,14 @@ const startProject = async (req, res, next) => {
       return next(err)
     }
 
+    // Require payment to have been made before project creation
+    if (!invitation.paid_at) {
+      const err = new Error('Cannot start project: Payment must be completed first. Please fund the escrow.')
+      err.statusCode = 400
+      return next(err)
+    }
+
+
     await pool.query('BEGIN')
 
     // Create the project

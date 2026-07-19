@@ -474,6 +474,97 @@ const deactivateUser = async (req, res, next) => {
   }
 };
 
+/**
+ * @desc    Get all disputes / projects with dispute status
+ * @route   GET /api/admin/disputes
+ * @access  Private (Admin)
+ */
+const getDisputes = async (req, res, next) => {
+  try {
+    const query = `
+      SELECT p.*, 
+        c.full_name as client_name, c.email as client_email,
+        e.full_name as expert_name, e.email as expert_email
+      FROM projects p
+      LEFT JOIN users c ON p.client_id = c.id
+      LEFT JOIN users e ON p.expert_id = e.id
+      ORDER BY p.id DESC;
+    `;
+    const result = await pool.query(query);
+    return res.status(200).json({
+      success: true,
+      disputes: result.rows
+    });
+  } catch (err) {
+    return next(err);
+  }
+};
+
+/**
+ * @desc    Resolve a dispute (refund client or release funds to expert)
+ * @route   POST /api/admin/disputes/:id/resolve
+ * @access  Private (Admin)
+ */
+const resolveDispute = async (req, res, next) => {
+  const { id } = req.params;
+  const { resolution } = req.body; // 'refund_client' or 'release_expert'
+
+  if (!['refund_client', 'release_expert'].includes(resolution)) {
+    const err = new Error("Invalid resolution. Must be 'refund_client' or 'release_expert'");
+    err.statusCode = 400;
+    return next(err);
+  }
+
+  const dbClient = await pool.connect();
+  try {
+    await dbClient.query('BEGIN');
+
+    const projectRes = await dbClient.query('SELECT * FROM projects WHERE id = $1', [id]);
+    if (projectRes.rows.length === 0) {
+      const err = new Error('Project not found');
+      err.statusCode = 404;
+      await dbClient.query('ROLLBACK');
+      return next(err);
+    }
+
+    const project = projectRes.rows[0];
+    const newStatus = resolution === 'refund_client' ? 'refunded' : 'completed';
+
+    await dbClient.query('UPDATE projects SET status = $1 WHERE id = $2', [newStatus, id]);
+
+    if (resolution === 'refund_client') {
+      await dbClient.query(
+        `UPDATE client_profiles SET budget = budget + $1 WHERE id = $2;`,
+        [project.agreed_price || 0, project.client_id]
+      );
+      await dbClient.query(
+        `INSERT INTO transactions (user_id, amount, type, description)
+         VALUES ($1, $2, 'refund', $3);`,
+        [project.client_id, project.agreed_price || 0, `Escrow refund for dispute on project #${id}`]
+      );
+    } else {
+      await dbClient.query(
+        `INSERT INTO transactions (user_id, amount, type, description)
+         VALUES ($1, $2, 'earning', $3);`,
+        [project.expert_id, project.agreed_price || 0, `Dispute resolved: Payment released for project #${id}`]
+      );
+    }
+
+    await dbClient.query('COMMIT');
+
+    return res.status(200).json({
+      success: true,
+      message: `Dispute resolved successfully (${resolution})`,
+      projectStatus: newStatus
+    });
+  } catch (err) {
+    await dbClient.query('ROLLBACK');
+    return next(err);
+  } finally {
+    dbClient.release();
+  }
+};
+
 module.exports = {
   getAllContent,
   setContentStatus,
@@ -482,5 +573,7 @@ module.exports = {
   createUser,
   updateUser,
   deleteUser,
-  deactivateUser
+  deactivateUser,
+  getDisputes,
+  resolveDispute
 };
