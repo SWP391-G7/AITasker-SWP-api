@@ -528,25 +528,27 @@ const resolveDispute = async (req, res, next) => {
     }
 
     const project = projectRes.rows[0];
-    const newStatus = resolution === 'refund_client' ? 'refunded' : 'completed';
+    const newStatus = resolution === 'refund_client' ? 'terminated' : 'completed';
 
     await dbClient.query('UPDATE projects SET status = $1 WHERE id = $2', [newStatus, id]);
+
+    const refundAmount = parseFloat(project.total_amount || 0);
 
     if (resolution === 'refund_client') {
       await dbClient.query(
         `UPDATE client_profiles SET budget = budget + $1 WHERE id = $2;`,
-        [project.agreed_price || 0, project.client_id]
+        [refundAmount, project.client_id]
       );
       await dbClient.query(
-        `INSERT INTO transactions (user_id, amount, type, description)
-         VALUES ($1, $2, 'refund', $3);`,
-        [project.client_id, project.agreed_price || 0, `Escrow refund for dispute on project #${id}`]
+        `INSERT INTO transactions (sender_id, receiver_id, amount, type, status, complete_at)
+         VALUES ($1, $1, $2, 'refund', 'completed', CURRENT_TIMESTAMP);`,
+        [project.client_id, refundAmount]
       );
     } else {
       await dbClient.query(
-        `INSERT INTO transactions (user_id, amount, type, description)
-         VALUES ($1, $2, 'earning', $3);`,
-        [project.expert_id, project.agreed_price || 0, `Dispute resolved: Payment released for project #${id}`]
+        `INSERT INTO transactions (sender_id, receiver_id, amount, type, status, complete_at)
+         VALUES ($1, $2, $3, 'escrow_release', 'completed', CURRENT_TIMESTAMP);`,
+        [project.client_id, project.expert_id, refundAmount]
       );
     }
 
