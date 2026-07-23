@@ -1,7 +1,7 @@
 const bcrypt = require('bcryptjs')
 const { pool } = require('../config/db')
 const { generateToken } = require('../utils/token')
-const { sendPasswordResetEmail } = require('../utils/emailService')
+const { sendVerificationCode, sendPasswordResetEmail } = require('../utils/emailService')
 const { OAuth2Client } = require('google-auth-library')
 const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID)
 
@@ -91,19 +91,38 @@ const register = async (req, res, next) => {
     }
     // No action needed for 'admin' as there is no specific admin profile table in schema.sql
 
+    // Generate & store verification code
+    const verificationCode = Math.floor(100000 + Math.random() * 900000).toString();
+    const codeExpiresAt = new Date(Date.now() + 15 * 60 * 1000);
+
+    const upsertCodeQuery = `
+      INSERT INTO email_verification_codes (email, code, expires_at)
+      VALUES ($1, $2, $3)
+      ON CONFLICT (email) 
+      DO UPDATE SET code = $2, expires_at = $3, is_used = false;
+    `;
+    await dbClient.query(upsertCodeQuery, [normalizedEmail, verificationCode, codeExpiresAt]);
+
     await dbClient.query('COMMIT')
 
-    // 5. Generate authentication token
+    // 5. Send verification email (non-blocking for registration transaction)
+    try {
+      await sendVerificationCode(normalizedEmail, verificationCode);
+    } catch (emailErr) {
+      console.error('[Registration] Failed to send verification code email:', emailErr.message);
+    }
+
+    // 6. Generate authentication token
     const token = generateToken({
       id: newUser.id,
       email: newUser.email,
       role: newUser.role
     })
 
-    // 6. Return response
+    // 7. Return response
     return res.status(201).json({
       success: true,
-      message: 'Registration successful',
+      message: 'Registration successful. Verification code sent to email.',
       user: {
         id: newUser.id,
         fullName: newUser.full_name,
