@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const {
+  getAnalytics,
   getAllContent,
   setContentStatus,
   getUsers,
@@ -16,6 +17,9 @@ const { protect, authorize } = require('../middleware/authMiddleware');
 
 // Guard all admin routes with authentication and role checking
 router.use(protect, authorize(['admin']));
+
+// Platform Analytics endpoint
+router.get('/analytics', getAnalytics);
 
 // Content Moderation endpoints
 router.get('/content', getAllContent);

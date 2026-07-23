@@ -7,6 +7,213 @@ const isValidEmail = (email) => {
   return emailRegex.test(email);
 };
 
+const toDateOnly = (date) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+/**
+ * @desc    Get platform-wide analytics calculated from live database records
+ * @route   GET /api/admin/analytics
+ * @access  Private (Admin)
+ */
+const getAnalytics = async (req, res, next) => {
+  try {
+    const requestedTo = req.query.to ? new Date(req.query.to) : new Date();
+    const endDate = Number.isNaN(requestedTo.getTime()) ? new Date() : requestedTo;
+    const requestedFrom = req.query.from
+      ? new Date(req.query.from)
+      : new Date(endDate.getFullYear(), 0, 1);
+    const startDate = Number.isNaN(requestedFrom.getTime())
+      ? new Date(endDate.getFullYear(), 0, 1)
+      : requestedFrom;
+
+    if (startDate > endDate) {
+      const err = new Error('The analytics start date must not be after the end date');
+      err.statusCode = 400;
+      return next(err);
+    }
+
+    const from = toDateOnly(startDate);
+    const to = toDateOnly(endDate);
+
+    // Run independent aggregate queries in parallel to keep the endpoint responsive.
+    const [
+      userSummaryRes,
+      projectSummaryRes,
+      revenueSummaryRes,
+      revenueByMonthRes,
+      engagementRes,
+      topExpertsRes,
+    ] = await Promise.all([
+      pool.query(`
+        SELECT
+          COUNT(*) FILTER (WHERE role = 'expert' AND acc_status = true) AS active_experts,
+          COUNT(*) FILTER (WHERE role <> 'admin') AS total_members,
+          COUNT(*) FILTER (WHERE role <> 'admin' AND acc_status = false) AS inactive_members
+        FROM users;
+      `),
+      pool.query(`
+        SELECT
+          COUNT(*) AS total_projects,
+          COUNT(*) FILTER (WHERE LOWER(status::text) = 'completed') AS completed_projects,
+          COALESCE(AVG(total_amount), 0) AS average_task_price
+        FROM projects
+        WHERE start_date::date BETWEEN $1::date AND $2::date;
+      `, [from, to]),
+      pool.query(`
+        SELECT COALESCE(SUM(amount), 0) AS total_revenue
+        FROM transactions
+        WHERE status::text = 'completed'
+          AND type::text = 'escrow_release'
+          AND complete_at::date BETWEEN $1::date AND $2::date;
+      `, [from, to]),
+      pool.query(`
+        WITH months AS (
+          SELECT generate_series(
+            date_trunc('month', $1::date) - interval '4 months',
+            date_trunc('month', $1::date),
+            interval '1 month'
+          ) AS month_start
+        )
+        SELECT
+          TO_CHAR(months.month_start, 'Mon') AS label,
+          TO_CHAR(months.month_start, 'YYYY-MM') AS month_key,
+          COALESCE(SUM(t.amount), 0) AS revenue
+        FROM months
+        LEFT JOIN transactions t
+          ON t.complete_at >= months.month_start
+          AND t.complete_at < months.month_start + interval '1 month'
+          AND t.status::text = 'completed'
+          AND t.type::text = 'escrow_release'
+        GROUP BY months.month_start
+        ORDER BY months.month_start;
+      `, [to]),
+      pool.query(`
+        SELECT
+          (SELECT COUNT(*) FROM users WHERE role = 'client' AND acc_status = true) AS active_clients,
+          (SELECT COUNT(DISTINCT client_id) FROM projects
+            WHERE start_date::date BETWEEN $1::date AND $2::date) AS engaged_clients,
+          (SELECT COUNT(*) FROM users WHERE role = 'expert' AND acc_status = true) AS active_experts,
+          (SELECT COUNT(DISTINCT expert_id) FROM projects
+            WHERE start_date::date BETWEEN $1::date AND $2::date) AS engaged_experts;
+      `, [from, to]),
+      pool.query(`
+        WITH project_stats AS (
+          SELECT
+            expert_id,
+            COUNT(*) AS total_projects,
+            COUNT(*) FILTER (WHERE LOWER(status::text) = 'completed') AS completed_projects
+          FROM projects
+          WHERE start_date::date BETWEEN $1::date AND $2::date
+          GROUP BY expert_id
+        ),
+        revenue_stats AS (
+          SELECT
+            receiver_id AS expert_id,
+            COALESCE(SUM(amount), 0) AS revenue
+          FROM transactions
+          WHERE status::text = 'completed'
+            AND type::text = 'escrow_release'
+            AND complete_at::date BETWEEN $1::date AND $2::date
+          GROUP BY receiver_id
+        )
+        SELECT
+          u.id,
+          u.full_name,
+          u.avatar_url,
+          u.acc_status,
+          ep.professional_title,
+          ep.skills,
+          ep.avg_rating,
+          COALESCE(ps.total_projects, 0) AS total_projects,
+          COALESCE(ps.completed_projects, 0) AS completed_projects,
+          COALESCE(rs.revenue, 0) AS revenue
+        FROM users u
+        JOIN expert_profiles ep ON ep.id = u.id
+        LEFT JOIN project_stats ps ON ps.expert_id = u.id
+        LEFT JOIN revenue_stats rs ON rs.expert_id = u.id
+        WHERE u.role = 'expert'
+        ORDER BY
+          COALESCE(rs.revenue, 0) DESC,
+          COALESCE(ps.completed_projects, 0) DESC,
+          ep.avg_rating DESC,
+          u.full_name ASC
+        LIMIT 5;
+      `, [from, to]),
+    ]);
+
+    const users = userSummaryRes.rows[0];
+    const projects = projectSummaryRes.rows[0];
+    const revenue = revenueSummaryRes.rows[0];
+    const engagement = engagementRes.rows[0];
+    const totalProjects = Number(projects.total_projects) || 0;
+    const completedProjects = Number(projects.completed_projects) || 0;
+    const activeClients = Number(engagement.active_clients) || 0;
+    const activeExperts = Number(engagement.active_experts) || 0;
+    const totalMembers = Number(users.total_members) || 0;
+
+    // Engagement is used as a transparent proxy because login-history data is not stored yet.
+    const clientEngagementRate = activeClients
+      ? (Number(engagement.engaged_clients) / activeClients) * 100
+      : 0;
+    const expertEngagementRate = activeExperts
+      ? (Number(engagement.engaged_experts) / activeExperts) * 100
+      : 0;
+    const inactiveAccountRate = totalMembers
+      ? (Number(users.inactive_members) / totalMembers) * 100
+      : 0;
+
+    return res.status(200).json({
+      success: true,
+      period: { from, to },
+      summary: {
+        totalRevenue: Number(revenue.total_revenue) || 0,
+        completionRate: totalProjects ? (completedProjects / totalProjects) * 100 : 0,
+        activeExperts: Number(users.active_experts) || 0,
+        averageTaskPrice: Number(projects.average_task_price) || 0,
+        totalProjects,
+        completedProjects,
+      },
+      revenueByMonth: revenueByMonthRes.rows.map((row) => ({
+        label: row.label,
+        monthKey: row.month_key,
+        revenue: Number(row.revenue) || 0,
+      })),
+      engagement: {
+        clientRate: clientEngagementRate,
+        expertRate: expertEngagementRate,
+        inactiveAccountRate,
+      },
+      topExperts: topExpertsRes.rows.map((expert) => {
+        const expertProjects = Number(expert.total_projects) || 0;
+        const expertCompletedProjects = Number(expert.completed_projects) || 0;
+
+        return {
+          id: expert.id,
+          name: expert.full_name,
+          avatarUrl: expert.avatar_url,
+          specialization: expert.professional_title || expert.skills || 'AI Specialist',
+          rating: Number(expert.avg_rating) || 0,
+          totalProjects: expertProjects,
+          completedProjects: expertCompletedProjects,
+          completionRate: expertProjects ? (expertCompletedProjects / expertProjects) * 100 : 0,
+          revenue: Number(expert.revenue) || 0,
+          status: expert.acc_status ? 'Active' : 'Suspended',
+        };
+      }),
+      definitions: {
+        revenue: 'Completed escrow releases during the selected period',
+        engagement: 'Active accounts that participated in at least one project during the selected period',
+      },
+    });
+  } catch (err) {
+    return next(err);
+  }
+};
+
 /**
  * @desc    Get all content (job posts and services) with optional status/type filtering
  * @route   GET /api/admin/content
@@ -704,6 +911,7 @@ const resolveDispute = async (req, res, next) => {
 };
 
 module.exports = {
+  getAnalytics,
   getAllContent,
   setContentStatus,
   getUsers,

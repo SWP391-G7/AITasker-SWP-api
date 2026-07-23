@@ -317,7 +317,111 @@ async function seedDatabase() {
     `, [expertIds['expert4@example.com'], clientIds['client3@example.com']]);
     const project2Id = projRes2.rows[0].id;
 
-    console.log(`Projects created. (Project IDs: ${project1Id} [Active], ${project2Id} [Completed])`);
+    // Add projects across the latest five months so the admin analytics page has
+    // meaningful completion, engagement, revenue trend, and expert ranking data.
+    const analyticsProjectsData = [
+      { expert: 'expert1@example.com', client: 'client1@example.com', amount: 4200, status: 'completed', monthOffset: 4, startDay: 3 },
+      { expert: 'expert2@example.com', client: 'client2@example.com', amount: 3600, status: 'completed', monthOffset: 4, startDay: 8 },
+      { expert: 'expert3@example.com', client: 'client3@example.com', amount: 5200, status: 'completed', monthOffset: 4, startDay: 12 },
+      { expert: 'expert4@example.com', client: 'client.nova@example.com', amount: 2400, status: 'completed', monthOffset: 3, startDay: 4 },
+      { expert: 'alex.nguyen@example.com', client: 'client.green@example.com', amount: 3100, status: 'completed', monthOffset: 3, startDay: 9 },
+      { expert: 'maya.patel@example.com', client: 'client.finpeak@example.com', amount: 4500, status: 'completed', monthOffset: 3, startDay: 13 },
+      { expert: 'sofia.martinez@example.com', client: 'client.travel@example.com', amount: 6100, status: 'completed', monthOffset: 2, startDay: 2 },
+      { expert: 'expert1@example.com', client: 'client.agri@example.com', amount: 3800, status: 'completed', monthOffset: 2, startDay: 7 },
+      { expert: 'expert2@example.com', client: 'client.logix@example.com', amount: 2900, status: 'completed', monthOffset: 2, startDay: 11 },
+      { expert: 'hana.kim@example.com', client: 'client.law@example.com', amount: 2200, status: 'completed', monthOffset: 1, startDay: 3 },
+      { expert: 'expert3@example.com', client: 'client.sports@example.com', amount: 2700, status: 'completed', monthOffset: 1, startDay: 8 },
+      { expert: 'alex.nguyen@example.com', client: 'client.city@example.com', amount: 2600, status: 'completed', monthOffset: 1, startDay: 12 },
+      { expert: 'expert1@example.com', client: 'client.nova@example.com', amount: 3200, status: 'completed', monthOffset: 0, startDay: 1 },
+      { expert: 'expert4@example.com', client: 'client.green@example.com', amount: 1800, status: 'completed', monthOffset: 0, startDay: 2 },
+      { expert: 'maya.patel@example.com', client: 'client.finpeak@example.com', amount: 5000, status: 'active', monthOffset: 0, startDay: 4 },
+      { expert: 'liam.wilson@example.com', client: 'client.agri@example.com', amount: 4700, status: 'active', monthOffset: 0, startDay: 6 },
+      { expert: 'noah.anderson@example.com', client: 'client.logix@example.com', amount: 5400, status: 'active', monthOffset: 0, startDay: 7 },
+      { expert: 'emma.thompson@example.com', client: 'client.city@example.com', amount: 3900, status: 'active', monthOffset: 0, startDay: 9 }
+    ];
+
+    const seededAnalyticsProjectIds = [];
+    for (const project of analyticsProjectsData) {
+      const expertId = expertIds[project.expert] || additionalUserIds[project.expert];
+      const clientId = clientIds[project.client] || additionalUserIds[project.client];
+
+      const analyticsProjectRes = await client.query(`
+        INSERT INTO projects (
+          expert_id, client_id, type, status, total_amount,
+          deliverable, start_date, end_date, title, description
+        )
+        VALUES (
+          $1, $2, 'fixed_milestone', $3::project_status, $4, $5,
+          date_trunc('month', CURRENT_DATE)
+            - ($6::integer * INTERVAL '1 month')
+            + ($7::integer * INTERVAL '1 day'),
+          CASE
+            WHEN LOWER($3::text) = 'completed' THEN
+              date_trunc('month', CURRENT_DATE)
+                - ($6::integer * INTERVAL '1 month')
+                + (($7::integer + 18) * INTERVAL '1 day')
+            ELSE NULL
+          END,
+          $8,
+          $9
+        )
+        RETURNING id;
+      `, [
+        expertId,
+        clientId,
+        project.status,
+        project.amount,
+        project.status === 'completed',
+        project.monthOffset,
+        project.startDay,
+        `Analytics Demo Project ${seededAnalyticsProjectIds.length + 1}`,
+        'Seeded project used to demonstrate live platform analytics and expert performance.'
+      ]);
+
+      const analyticsProjectId = analyticsProjectRes.rows[0].id;
+      seededAnalyticsProjectIds.push(analyticsProjectId);
+
+      if (project.status === 'completed') {
+        // Only completed escrow releases count toward the analytics revenue KPI.
+        await client.query(`
+          INSERT INTO transactions (
+            project_id, sender_id, receiver_id, amount,
+            type, status, funding_source, complete_at
+          )
+          VALUES (
+            $1, $2, $3, $4,
+            'escrow_release', 'completed', 'card',
+            date_trunc('month', CURRENT_DATE)
+              - ($5::integer * INTERVAL '1 month')
+              + (($6::integer + 18) * INTERVAL '1 day')
+          );
+        `, [
+          analyticsProjectId,
+          clientId,
+          expertId,
+          project.amount,
+          project.monthOffset,
+          project.startDay
+        ]);
+      }
+    }
+
+    // This failed transaction proves that failed payments are excluded from released revenue.
+    await client.query(`
+      INSERT INTO transactions (
+        project_id, sender_id, receiver_id, amount,
+        type, status, funding_source, complete_at
+      )
+      VALUES ($1, $2, $3, 9999.00, 'escrow_release', 'failed', 'card', NOW() - INTERVAL '2 days');
+    `, [
+      seededAnalyticsProjectIds[seededAnalyticsProjectIds.length - 1],
+      additionalUserIds['client.city@example.com'],
+      additionalUserIds['emma.thompson@example.com']
+    ]);
+
+    console.log(
+      `Projects created. Base: ${project1Id}, ${project2Id}; analytics demo: ${seededAnalyticsProjectIds.length}.`
+    );
 
     // ----------------------------------------------------
     // STEP 8: Insert Milestones
