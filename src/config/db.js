@@ -1,3 +1,10 @@
+/**
+ * Backend module: config/db.js
+ *
+ * Vai trò: Cấu hình db: khởi tạo kết nối hoặc tài nguyên hạ tầng dùng chung của backend.
+ * Luồng chính: Đọc biến môi trường, tạo client/pool và export instance cho controller hoặc utility tái sử dụng.
+ * Lưu ý bảo trì: Không hard-code secret; mọi credential phải lấy từ environment.
+ */
 const { Pool } = require('pg');
 require('dotenv').config();
 

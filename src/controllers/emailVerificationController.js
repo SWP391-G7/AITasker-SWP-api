@@ -1,11 +1,20 @@
+/**
+ * Backend module: controllers/emailVerificationController.js
+ *
+ * Vai trò: Controller email Verification Controller: tiếp nhận request đã đi qua route/middleware, kiểm tra dữ liệu đầu vào và điều phối nghiệp vụ.
+ * Luồng chính: Đọc req/user/params/body, làm việc với PostgreSQL hoặc dịch vụ ngoài, sau đó trả JSON chuẩn hoặc chuyển lỗi cho error middleware.
+ * Lưu ý bảo trì: Khi sửa controller cần giữ status code, quyền truy cập, transaction và cấu trúc response đồng nhất với frontend.
+ */
 const { pool } = require('../config/db');
 const { sendVerificationCode } = require('../utils/emailService');
 const { generateToken } = require('../utils/token');
 
+// Thực hiện phần logic “generate verification code” trong phạm vi trách nhiệm của module hiện tại.
 const generateVerificationCode = () => {
   return Math.floor(100000 + Math.random() * 900000).toString();
 };
 
+// Tạo hoặc gửi dữ liệu cho nghiệp vụ “send code to email”, đồng thời chuyển lỗi về caller/UI theo cơ chế của module.
 const sendCodeToEmail = async (req, res, next) => {
   const { email } = req.body;
 
@@ -44,6 +53,7 @@ const sendCodeToEmail = async (req, res, next) => {
   }
 };
 
+// Thực hiện phần logic “verify code” trong phạm vi trách nhiệm của module hiện tại.
 const verifyCode = async (req, res, next) => {
   const { email, code } = req.body;
 

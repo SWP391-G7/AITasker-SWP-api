@@ -1,3 +1,10 @@
+/**
+ * Backend module: controllers/milestoneController.js
+ *
+ * Vai trò: Controller milestone Controller: tiếp nhận request đã đi qua route/middleware, kiểm tra dữ liệu đầu vào và điều phối nghiệp vụ.
+ * Luồng chính: Đọc req/user/params/body, làm việc với PostgreSQL hoặc dịch vụ ngoài, sau đó trả JSON chuẩn hoặc chuyển lỗi cho error middleware.
+ * Lưu ý bảo trì: Khi sửa controller cần giữ status code, quyền truy cập, transaction và cấu trúc response đồng nhất với frontend.
+ */
 const { pool } = require('../config/db');
 const { sendNotification } = require('../utils/notificationService');
 
@@ -319,6 +326,7 @@ const requestPlanChanges = async (req, res, next) => {
 
       const updated = [];
       for (const row of planningRes.rows) {
+        // Thực hiện phần logic “note” trong phạm vi trách nhiệm của module hiện tại.
         const note = (notes && notes[row.id]) ? String(notes[row.id]).trim() : null;
         const r = await dbClient.query(
           "UPDATE milestones SET status = 'change_requested', change_request_note = $1 WHERE id = $2 RETURNING *;",
