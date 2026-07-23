@@ -153,7 +153,7 @@ const setContentStatus = async (req, res, next) => {
 const getUsers = async (req, res, next) => {
   try {
     const usersQuery = `
-      SELECT id, full_name, email, role, is_verified, created_at, acc_status 
+      SELECT id, full_name, email, role, is_verified, created_at, acc_status, avatar_url
       FROM users 
       ORDER BY created_at DESC, id DESC;
     `;
@@ -179,7 +179,7 @@ const getUserById = async (req, res, next) => {
 
   try {
     const userQuery = `
-      SELECT id, full_name, email, role, is_verified, created_at, acc_status 
+      SELECT id, full_name, email, role, is_verified, created_at, acc_status, avatar_url
       FROM users 
       WHERE id = $1;
     `;
