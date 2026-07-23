@@ -72,6 +72,34 @@ Example JSON:
   "bio": "Passionate software engineer specializing in building intelligent systems..."
 }`;
 
+    case 'profile_expert':
+      return `Polish this AI expert profile draft while preserving all truthful details supplied by the user: "${text}".
+You must respond with a JSON object containing exactly three string fields:
+- "professionalTitle": A concise, credible professional title.
+- "skills": A comma-separated list of 3-4 core skills grounded only in the draft.
+- "bio": An engaging first-person professional summary of the expert's experience, strengths, and value to clients. Do not invent employers, qualifications, metrics, or years of experience.
+
+Example JSON:
+{
+  "professionalTitle": "Senior AI Integration Developer",
+  "skills": "Python, Gemini API, ReactJS",
+  "bio": "I specialize in building reliable AI-powered applications and integrating intelligent workflows into modern web products..."
+}`;
+
+    case 'profile_client':
+      return `Polish this client or company profile draft while preserving all truthful details supplied by the user: "${text}".
+You must respond with a JSON object containing exactly three string fields:
+- "companyName": A clean company or client display name based on the draft. Do not invent a new company name.
+- "industry": A concise industry label based on the draft.
+- "bio": An engaging company overview describing its focus, typical projects, and mission. Do not invent achievements, metrics, locations, or services not present in the draft.
+
+Example JSON:
+{
+  "companyName": "AITasker",
+  "industry": "Artificial Intelligence",
+  "bio": "AITasker connects organizations with experienced AI professionals to deliver practical, high-impact technology projects..."
+}`;
+
     default:
       return `Polishing and extending the following draft: "${text}". 
 Respond with a JSON object containing exactly one string field:
@@ -81,7 +109,7 @@ Respond with a JSON object containing exactly one string field:
 
 // Map route types to database enum: 'job_assistant' or 'service_generator'
 const getModuleType = (type) => {
-  if (['job_description', 'proposal', 'request'].includes(type)) {
+  if (['job_description', 'proposal', 'request', 'profile_client'].includes(type)) {
     return 'job_assistant';
   }
   return 'service_generator';
