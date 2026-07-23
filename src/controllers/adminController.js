@@ -804,24 +804,32 @@ const resolveDispute = async (req, res, next) => {
 
     const project = projectRes.rows[0];
 
-    // 3. Calculate remaining escrow balance (total project amount minus already released milestone funds)
+    // 3. Calculate remaining escrow balance and identify current active milestone
     const milestonesRes = await dbClient.query(
-      'SELECT amount, status, released_amount FROM milestones WHERE project_id = $1',
+      'SELECT id, title, amount, status, position, released_amount FROM milestones WHERE project_id = $1 ORDER BY position ASC',
       [projectId]
     );
 
     let totalReleased = 0;
-    milestonesRes.rows.forEach((m) => {
+    let currentMilestone = null;
+
+    for (const m of milestonesRes.rows) {
       const status = String(m.status).toLowerCase();
-      if (status === 'released' || status === 'finished' || status === 'approved') {
+      if (['released', 'finished', 'approved'].includes(status)) {
         totalReleased += parseFloat(m.released_amount || m.amount || 0);
+      } else if (!currentMilestone && ['ongoing', 'submitted', 'submitted_for_review', 'under_review', 'revision_requested', 'planned', 'planning'].includes(status)) {
+        currentMilestone = m;
       }
-    });
+    }
 
     const totalProjectAmount = parseFloat(project.total_amount || 0);
     const remainingEscrow = Math.max(0, totalProjectAmount - totalReleased);
 
-    const newProjectStatus = resolution === 'refund_client' ? 'terminated' : 'completed';
+    // Current milestone amount (if any active milestone exists)
+    const activeMilestoneAmount = currentMilestone ? Math.min(remainingEscrow, parseFloat(currentMilestone.amount || 0)) : 0;
+    const futureEscrowRefund = Math.max(0, remainingEscrow - activeMilestoneAmount);
+
+    const newProjectStatus = 'terminated';
 
     // 4. Update project status
     await dbClient.query(
@@ -829,25 +837,62 @@ const resolveDispute = async (req, res, next) => {
       [newProjectStatus, projectId]
     );
 
-    // 5. Handle financial transfers for remaining escrow balance
-    if (resolution === 'refund_client') {
-      if (remainingEscrow > 0) {
+    // 5. Handle financial transfers based on dispute outcome rules:
+    // - Expert Win (release_expert): Expert receives the amount of the milestone currently worked on (activeMilestoneAmount).
+    //   The remaining unstarted escrow (futureEscrowRefund) is refunded to the client.
+    // - Client Win (refund_client): Client receives current milestone amount + remaining unstarted escrow (full remainingEscrow).
+    let expertReleaseAmount = 0;
+    let clientRefundAmount = 0;
+
+    if (resolution === 'release_expert') {
+      expertReleaseAmount = activeMilestoneAmount;
+      clientRefundAmount = futureEscrowRefund;
+    } else {
+      // refund_client
+      expertReleaseAmount = 0;
+      clientRefundAmount = remainingEscrow;
+    }
+
+    // Process Client Refund
+    if (clientRefundAmount > 0) {
+      await dbClient.query(
+        `UPDATE client_profiles SET budget = budget + $1 WHERE id = $2;`,
+        [clientRefundAmount, project.client_id]
+      );
+      await dbClient.query(
+        `INSERT INTO transactions (project_id, sender_id, receiver_id, amount, type, status, complete_at)
+         VALUES ($1, $2, $2, $3, 'refund', 'completed', CURRENT_TIMESTAMP);`,
+        [projectId, project.client_id, clientRefundAmount]
+      );
+    }
+
+    // Process Expert Release
+    if (expertReleaseAmount > 0) {
+      await dbClient.query(
+        `INSERT INTO transactions (project_id, sender_id, receiver_id, amount, type, status, complete_at)
+         VALUES ($1, $2, $3, $4, 'escrow_release', 'completed', CURRENT_TIMESTAMP);`,
+        [projectId, project.client_id, project.expert_id, expertReleaseAmount]
+      );
+
+      // Update current milestone status to finished
+      if (currentMilestone) {
         await dbClient.query(
-          `UPDATE client_profiles SET budget = budget + $1 WHERE id = $2;`,
-          [remainingEscrow, project.client_id]
-        );
-        await dbClient.query(
-          `INSERT INTO transactions (project_id, sender_id, receiver_id, amount, type, status, complete_at)
-           VALUES ($1, $2, $2, $3, 'refund', 'completed', CURRENT_TIMESTAMP);`,
-          [projectId, project.client_id, remainingEscrow]
+          `UPDATE milestones SET status = 'finished', released_amount = $1 WHERE id = $2`,
+          [expertReleaseAmount, currentMilestone.id]
         );
       }
-    } else {
-      if (remainingEscrow > 0) {
+    }
+
+    // Update uncompleted remaining milestones status to cancelled
+    for (const m of milestonesRes.rows) {
+      const status = String(m.status).toLowerCase();
+      if (!['finished', 'released'].includes(status)) {
+        if (m.id === currentMilestone?.id && resolution === 'release_expert') {
+          continue;
+        }
         await dbClient.query(
-          `INSERT INTO transactions (project_id, sender_id, receiver_id, amount, type, status, complete_at)
-           VALUES ($1, $2, $3, $4, 'escrow_release', 'completed', CURRENT_TIMESTAMP);`,
-          [projectId, project.client_id, project.expert_id, remainingEscrow]
+          `UPDATE milestones SET status = 'cancelled' WHERE id = $1`,
+          [m.id]
         );
       }
     }
@@ -872,29 +917,44 @@ const resolveDispute = async (req, res, next) => {
 
     await dbClient.query('COMMIT');
 
-    // 8. Trigger Notifications
+    // 8. Trigger Notifications for Win / Loss Outcome & Admin Reasoning
     try {
       const { sendNotification } = require('../utils/notificationService');
-      const outcomeText = resolution === 'refund_client'
-        ? `Dispute resolved in favor of the client. Unreleased escrow ($${remainingEscrow.toFixed(2)}) has been refunded.`
-        : `Dispute resolved in favor of the expert. Escrow payment ($${remainingEscrow.toFixed(2)}) has been released.`;
+      const reasoningSnippet = admin_notes && admin_notes.trim() ? ` Admin Explanation: "${admin_notes.trim()}"` : '';
 
-      await sendNotification(project.client_id, {
-        title: "Dispute Resolved",
-        message: `Project "${project.title}": ${outcomeText}`,
-        type: "project_finished",
-        referenceId: projectId
-      });
+      if (resolution === 'refund_client') {
+        await sendNotification(project.client_id, {
+          title: "Dispute Outcome: You Won",
+          message: `Your dispute for project "${project.title}" has been resolved in your favor. Full remaining escrow ($${clientRefundAmount.toFixed(2)}) has been refunded to your account.${reasoningSnippet}`,
+          type: "project_finished",
+          referenceId: projectId
+        });
 
-      await sendNotification(project.expert_id, {
-        title: "Dispute Resolved",
-        message: `Project "${project.title}": ${outcomeText}`,
-        type: "project_finished",
-        referenceId: projectId
-      });
+        await sendNotification(project.expert_id, {
+          title: "Dispute Outcome: Case Resolved (Client Win)",
+          message: `The dispute for project "${project.title}" has been resolved in favor of the client. Unreleased escrow funds were refunded to the client.${reasoningSnippet}`,
+          type: "project_finished",
+          referenceId: projectId
+        });
+      } else {
+        await sendNotification(project.expert_id, {
+          title: "Dispute Outcome: You Won",
+          message: `Your dispute for project "${project.title}" has been resolved in your favor. Payment for the current milestone ($${expertReleaseAmount.toFixed(2)}) has been released to your account.${reasoningSnippet}`,
+          type: "project_finished",
+          referenceId: projectId
+        });
+
+        await sendNotification(project.client_id, {
+          title: "Dispute Outcome: Case Resolved (Expert Win)",
+          message: `The dispute for project "${project.title}" was resolved in favor of the expert. Current milestone payment ($${expertReleaseAmount.toFixed(2)}) was released to the expert${clientRefundAmount > 0 ? `, and unstarted escrow ($${clientRefundAmount.toFixed(2)}) was refunded to your budget` : ''}.${reasoningSnippet}`,
+          type: "project_finished",
+          referenceId: projectId
+        });
+      }
     } catch (notifErr) {
       console.error('[Notification Trigger Error] resolveDispute:', notifErr.message);
     }
+
 
     return res.status(200).json({
       success: true,

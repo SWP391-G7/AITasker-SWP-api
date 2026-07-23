@@ -30,7 +30,7 @@ const app = express()
 app.use(cors({
   origin: '*', // Allow React frontend from any origin for ease of development; restrict in production
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  allowedHeaders: ['Content-Type', 'Authorization', 'Cache-Control', 'X-Requested-With', 'Pragma']
 }))
 
 app.use(express.json())
