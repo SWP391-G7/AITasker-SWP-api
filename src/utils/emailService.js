@@ -4,28 +4,48 @@ require('dotenv').config();
 let transporter;
 
 const initializeEmailService = async () => {
-  if (process.env.NODE_ENV === 'production') {
+  const hasSmtpConfig = Boolean(process.env.SMTP_HOST || process.env.SMTP_USER);
+
+  if (hasSmtpConfig || process.env.NODE_ENV === 'production') {
+    const host = process.env.SMTP_HOST || 'smtp.gmail.com';
+    const port = parseInt(process.env.SMTP_PORT, 10) || 587;
+    const secure = process.env.SMTP_SECURE === 'true';
+
     transporter = nodemailer.createTransport({
-      host: process.env.SMTP_HOST,
-      port: process.env.SMTP_PORT,
-      secure: process.env.SMTP_SECURE === 'true',
+      host,
+      port,
+      secure,
       auth: {
         user: process.env.SMTP_USER,
         pass: process.env.SMTP_PASS
       }
     });
+
+    console.log(`[EmailService] Initialized real SMTP transporter (${host}:${port}) for user: ${process.env.SMTP_USER || 'none'}`);
   } else {
-    const testAccount = await nodemailer.createTestAccount();
-    transporter = nodemailer.createTransport({
-      host: testAccount.smtp.host,
-      port: testAccount.smtp.port,
-      secure: testAccount.smtp.secure,
-      auth: {
-        user: testAccount.user,
-        pass: testAccount.pass
-      }
-    });
+    console.log('[EmailService] SMTP credentials not set in environment. Generating Ethereal test account...');
+    try {
+      const testAccount = await nodemailer.createTestAccount();
+      transporter = nodemailer.createTransport({
+        host: testAccount.smtp.host,
+        port: testAccount.smtp.port,
+        secure: testAccount.smtp.secure,
+        auth: {
+          user: testAccount.user,
+          pass: testAccount.pass
+        }
+      });
+      console.log(`[EmailService] Ethereal test account created: ${testAccount.user}`);
+    } catch (err) {
+      console.error('[EmailService] Failed to create Ethereal test account:', err.message);
+    }
   }
+};
+
+const getSenderAddress = () => {
+  if (process.env.EMAIL_FROM) return process.env.EMAIL_FROM;
+  if (process.env.SMTP_USER) return `"AITasker" <${process.env.SMTP_USER}>`;
+  return 'noreply@aitasker.com';
 };
 
 const sendVerificationCode = async (email, code) => {
@@ -35,7 +55,7 @@ const sendVerificationCode = async (email, code) => {
     }
 
     const mailOptions = {
-      from: process.env.EMAIL_FROM || 'noreply@aitasker.com',
+      from: getSenderAddress(),
       to: email,
       subject: 'Email Verification Code - AITasker',
       html: `
@@ -56,8 +76,11 @@ const sendVerificationCode = async (email, code) => {
 
     const info = await transporter.sendMail(mailOptions);
     
-    if (process.env.NODE_ENV !== 'production') {
-      console.log('Preview URL: %s', nodemailer.getTestMessageUrl(info));
+    const previewUrl = nodemailer.getTestMessageUrl(info);
+    if (previewUrl) {
+      console.log('[EmailService] Ethereal Preview URL: %s', previewUrl);
+    } else {
+      console.log('[EmailService] Verification email sent successfully to:', email);
     }
 
     return info;
@@ -74,7 +97,7 @@ const sendPasswordResetEmail = async (email, code) => {
     }
 
     const mailOptions = {
-      from: process.env.EMAIL_FROM || 'noreply@aitasker.com',
+      from: getSenderAddress(),
       to: email,
       subject: 'Password Reset Code - AITasker',
       html: `
@@ -95,8 +118,11 @@ const sendPasswordResetEmail = async (email, code) => {
 
     const info = await transporter.sendMail(mailOptions);
 
-    if (process.env.NODE_ENV !== 'production') {
-      console.log('Preview URL: %s', nodemailer.getTestMessageUrl(info));
+    const previewUrl = nodemailer.getTestMessageUrl(info);
+    if (previewUrl) {
+      console.log('[EmailService] Ethereal Preview URL: %s', previewUrl);
+    } else {
+      console.log('[EmailService] Password reset email sent successfully to:', email);
     }
 
     return info;
@@ -111,4 +137,5 @@ module.exports = {
   sendVerificationCode,
   sendPasswordResetEmail
 };
+
 
