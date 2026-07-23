@@ -140,8 +140,7 @@ const getAnalytics = async (req, res, next) => {
           COALESCE(rs.revenue, 0) DESC,
           COALESCE(ps.completed_projects, 0) DESC,
           ep.avg_rating DESC,
-          u.full_name ASC
-        LIMIT 5;
+          u.full_name ASC;
       `, [from, to]),
     ]);
 
