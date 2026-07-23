@@ -13,7 +13,7 @@ const getConversations = async (req, res, next) => {
       WITH last_messages AS (
           SELECT DISTINCT ON (conversation_id) 
               conversation_id, 
-              content, 
+              CASE WHEN is_removed THEN 'Message has been removed' ELSE content END AS content, 
               send_at
           FROM messages
           ORDER BY conversation_id, send_at DESC
@@ -36,6 +36,7 @@ const getConversations = async (req, res, next) => {
           other_u.full_name AS other_user_name,
           other_u.email AS other_user_email,
           other_u.role AS other_user_role,
+          other_u.avatar_url AS other_user_avatar_url,
           ep.professional_title AS other_user_professional_title,
           cp.company_name AS other_user_company_name,
           COALESCE(lm.content, '') AS last_message,
@@ -140,9 +141,10 @@ const getOrCreateConversation = async (req, res, next) => {
 const getConversationMessages = async (req, res, next) => {
   const conversationId = req.params.id;
   const userId = req.user.id;
+  const userRole = req.user.role;
 
   try {
-    // 1. Verify conversation exists and user is a participant
+    // 1. Verify conversation exists and user is a participant (unless Admin)
     const convCheck = await pool.query(
       'SELECT sender_id, target_id FROM conversations WHERE id = $1',
       [conversationId]
@@ -155,19 +157,21 @@ const getConversationMessages = async (req, res, next) => {
     }
 
     const { sender_id, target_id } = convCheck.rows[0];
-    if (sender_id !== userId && target_id !== userId) {
+    if (userRole !== 'admin' && sender_id !== userId && target_id !== userId) {
       const err = new Error('Forbidden: You are not a participant in this conversation');
       err.statusCode = 403;
       return next(err);
     }
 
     // 2. Mark unread messages sent by the other user as read
-    await pool.query(
-      `UPDATE messages 
-       SET is_read = true 
-       WHERE conversation_id = $1 AND user_id != $2 AND is_read = false`,
-      [conversationId, userId]
-    );
+    if (userRole !== 'admin') {
+      await pool.query(
+        `UPDATE messages 
+         SET is_read = true 
+         WHERE conversation_id = $1 AND user_id != $2 AND is_read = false`,
+        [conversationId, userId]
+      );
+    }
 
     // 3. Fetch all messages in the conversation
     const messagesQuery = `
@@ -178,6 +182,7 @@ const getConversationMessages = async (req, res, next) => {
           m.content,
           m.attachments,
           m.is_read,
+          m.is_removed,
           m.send_at,
           u.full_name AS sender_name,
           u.role AS sender_role
@@ -188,14 +193,26 @@ const getConversationMessages = async (req, res, next) => {
     `;
     const messagesResult = await pool.query(messagesQuery, [conversationId]);
 
+    // Non-admin users see "Message has been removed" for removed messages
+    const formattedMessages = messagesResult.rows.map(msg => {
+      if (msg.is_removed && userRole !== 'admin') {
+        return {
+          ...msg,
+          content: 'Message has been removed'
+        };
+      }
+      return msg;
+    });
+
     return res.status(200).json({
       success: true,
-      data: messagesResult.rows
+      data: formattedMessages
     });
   } catch (err) {
     return next(err);
   }
 };
+
 
 module.exports = {
   getConversations,

@@ -84,6 +84,81 @@ const createMessage = async (req, res, next) => {
   }
 };
 
-module.exports = {
-  createMessage
+/**
+ * @desc    Soft-delete / remove a message (only sender or admin)
+ * @route   DELETE /api/messages/:id
+ * @access  Private
+ */
+const removeMessage = async (req, res, next) => {
+  const userId = req.user.id;
+  const userRole = req.user.role;
+  const messageId = req.params.id;
+
+  try {
+    // 1. Fetch message details and conversation
+    const msgCheck = await pool.query(
+      `SELECT m.id, m.user_id, m.conversation_id, m.is_removed, c.sender_id, c.target_id 
+       FROM messages m
+       INNER JOIN conversations c ON m.conversation_id = c.id
+       WHERE m.id = $1`,
+      [messageId]
+    );
+
+    if (msgCheck.rows.length === 0) {
+      const err = new Error('Message not found');
+      err.statusCode = 404;
+      return next(err);
+    }
+
+    const { user_id, conversation_id, sender_id, target_id } = msgCheck.rows[0];
+
+    // 2. Authorization check: must be sender or admin
+    if (user_id !== userId && userRole !== 'admin') {
+      const err = new Error('Forbidden: You can only remove your own messages');
+      err.statusCode = 403;
+      return next(err);
+    }
+
+    // 3. Mark message as removed (soft delete without deleting database row)
+    const updateRes = await pool.query(
+      `UPDATE messages 
+       SET is_removed = true 
+       WHERE id = $1 
+       RETURNING id, user_id, conversation_id, is_removed, send_at;`,
+      [messageId]
+    );
+
+    const updatedMessage = updateRes.rows[0];
+
+    // 4. Broadcast message removal to conversation participants
+    const otherUserId = sender_id === userId ? target_id : sender_id;
+    const { broadcast } = require('../config/wsClients');
+    broadcast(otherUserId, {
+      type: 'message_removed',
+      conversationId: conversation_id,
+      messageId: messageId
+    });
+    broadcast(userId, {
+      type: 'message_removed',
+      conversationId: conversation_id,
+      messageId: messageId
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: 'Message removed successfully',
+      data: {
+        ...updatedMessage,
+        content: 'Message has been removed'
+      }
+    });
+  } catch (err) {
+    return next(err);
+  }
 };
+
+module.exports = {
+  createMessage,
+  removeMessage
+};
+

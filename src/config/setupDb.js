@@ -51,6 +51,11 @@ async function initDatabase() {
     await client.query(alterQuery);
     console.log('Password column checked/added successfully.');
 
+    // Ensure users table has avatar_url column
+    console.log('Ensuring users table has "avatar_url" column...');
+    await client.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_url VARCHAR(255) DEFAULT NULL;');
+    console.log('Avatar URL column checked/added successfully.');
+
     // Ensure conversations table matches the participant-based schema (sender_id, target_id)
     console.log('Ensuring conversations table matches the participant-based schema...');
     await client.query('ALTER TABLE conversations DROP COLUMN IF EXISTS project_id;');
@@ -58,41 +63,107 @@ async function initDatabase() {
     await client.query('ALTER TABLE conversations ADD COLUMN IF NOT EXISTS target_id UUID REFERENCES users(id) ON DELETE CASCADE;');
     console.log('Conversations table checked/migrated successfully.');
 
+    // Ensure rating table exists
+    console.log('Ensuring rating table exists...');
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS rating (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        rate_sum INT DEFAULT 0,
+        count INT DEFAULT 0
+      );
+    `);
+
+    // Ensure rating column exists in users table
+    console.log('Ensuring users table has "rating" column...');
+    await client.query(`
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS rating UUID REFERENCES rating(id) ON DELETE SET NULL DEFAULT NULL;
+    `);
+
+    // Ensure rating column exists in services table
+    console.log('Ensuring services table has "rating" column...');
+    await client.query(`
+      ALTER TABLE services ADD COLUMN IF NOT EXISTS rating UUID REFERENCES rating(id) ON DELETE SET NULL DEFAULT NULL;
+    `);
+
+    console.log('Rating & Review tables and attributes checked/added successfully.');
+
+    // Ensure notification_type enum exists
+    console.log('Ensuring notification_type enum exists...');
+    try {
+      await client.query(`
+        DO $$
+        BEGIN
+          IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'notification_type') THEN
+            CREATE TYPE notification_type AS ENUM (
+              'new_proposal', 
+              'counter_proposal', 
+              'proposal_accepted', 
+              'new_milestones', 
+              'milestones_accepted', 
+              'milestone_rejected', 
+              'milestone_submitted', 
+              'milestone_approved', 
+              'milestones_finished', 
+              'new_project', 
+              'project_finished'
+            );
+          END IF;
+        END
+        $$;
+      `);
+      console.log('notification_type enum checked/created successfully.');
+    } catch (err) {
+      console.warn('Non-fatal warning creating notification_type enum:', err.message);
+    }
+
+    // Ensure notifications table exists
+    console.log('Ensuring notifications table exists...');
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS notifications (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        title VARCHAR(255) NOT NULL,
+        message TEXT NOT NULL,
+        type notification_type NOT NULL,
+        reference_id UUID,
+        is_read BOOLEAN DEFAULT false,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+    console.log('notifications table checked/created successfully.');
+
+    // Ensure search index exists
+    console.log('Ensuring notifications index exists...');
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_notifications_user_unread ON notifications(user_id, is_read);
+    `);
+    console.log('notifications index checked/created successfully.');
+
     // Ensure client_profiles and expert_profiles have the new onboarding columns
     console.log('Ensuring client_profiles and expert_profiles have onboarding columns...');
     await client.query('ALTER TABLE client_profiles ADD COLUMN IF NOT EXISTS company_name VARCHAR(255);');
     await client.query('ALTER TABLE client_profiles ADD COLUMN IF NOT EXISTS industry VARCHAR(255);');
+    await client.query('ALTER TABLE client_profiles ADD COLUMN IF NOT EXISTS budget NUMERIC(10, 2) DEFAULT 10000.00;');
+    await client.query('UPDATE client_profiles SET budget = 10000.00 WHERE budget IS NULL;');
     
     await client.query('ALTER TABLE expert_profiles ADD COLUMN IF NOT EXISTS professional_title VARCHAR(255);');
     await client.query('ALTER TABLE expert_profiles ADD COLUMN IF NOT EXISTS experience VARCHAR(100);');
     await client.query('ALTER TABLE expert_profiles ADD COLUMN IF NOT EXISTS portfolio_url VARCHAR(255);');
     console.log('Onboarding columns checked/added successfully.');
     
-    // Add pending status to job_status enum
-    console.log('Ensuring job_status enum has "pending" status...');
-    try {
-      await client.query("ALTER TYPE job_status ADD VALUE 'pending';");
-      console.log('Added pending status to job_status enum.');
-    } catch (err) {
-      if (err.code !== '42710') {
-        console.warn('Non-fatal warning adding pending status to job_status enum:', err.message);
-      } else {
-        console.log('Pending status already exists in job_status enum.');
+    // Ensure job_status enum has all required values
+    console.log('Ensuring job_status enum has required values (pending, closed, removed, rejected)...');
+    const requiredJobStatuses = ['pending', 'closed', 'removed', 'rejected'];
+    for (const val of requiredJobStatuses) {
+      try {
+        await client.query(`ALTER TYPE job_status ADD VALUE IF NOT EXISTS '${val}';`);
+      } catch (err) {
+        if (err.code !== '42710' && err.code !== '42704') {
+          console.warn(`Non-fatal warning adding '${val}' to job_status enum:`, err.message);
+        }
       }
     }
-
-    // Add closed status to job_status enum
-    console.log('Ensuring job_status enum has "closed" status...');
-    try {
-      await client.query("ALTER TYPE job_status ADD VALUE 'closed';");
-      console.log('Added closed status to job_status enum.');
-    } catch (err) {
-      if (err.code !== '42710') {
-        console.warn('Non-fatal warning adding closed status to job_status enum:', err.message);
-      } else {
-        console.log('Closed status already exists in job_status enum.');
-      }
-    }
+    console.log('job_status enum values checked/added successfully.');
 
     // Add counter-proposal columns to proposals table
     console.log('Ensuring proposals table has counter-proposal columns...');
@@ -118,7 +189,20 @@ async function initDatabase() {
     console.log('Ensuring projects table has title and description columns...');
     await client.query('ALTER TABLE projects ADD COLUMN IF NOT EXISTS title VARCHAR(255);');
     await client.query('ALTER TABLE projects ADD COLUMN IF NOT EXISTS description TEXT;');
+    await client.query('ALTER TABLE projects ADD COLUMN IF NOT EXISTS duration_days INTEGER;');
     console.log('Projects table columns checked/added successfully.');
+
+    // Add requirements column to job_posts
+    console.log('Ensuring job_posts has requirements column...');
+    await client.query('ALTER TABLE job_posts ADD COLUMN IF NOT EXISTS requirements TEXT;');
+    console.log('Requirements column checked/added successfully.');
+
+    // Add tags, images and video_link columns to job_posts
+    console.log('Ensuring job_posts has tags and media columns...');
+    await client.query('ALTER TABLE job_posts ADD COLUMN IF NOT EXISTS tags TEXT;');
+    await client.query('ALTER TABLE job_posts ADD COLUMN IF NOT EXISTS images TEXT;');
+    await client.query('ALTER TABLE job_posts ADD COLUMN IF NOT EXISTS video_link VARCHAR(255);');
+    console.log('Tags and media columns checked/added successfully.');
 
     // Remove deprecated deadline column from job_posts (replaced by duration_days)
     console.log('Removing deprecated deadline column from job_posts if present...');
@@ -133,6 +217,15 @@ async function initDatabase() {
     await client.query('ALTER TABLE milestones ADD COLUMN IF NOT EXISTS change_request_note TEXT;');
     await client.query('ALTER TABLE milestones ADD COLUMN IF NOT EXISTS deliverable_url TEXT;');
     await client.query('ALTER TABLE milestones ADD COLUMN IF NOT EXISTS deliverable_note TEXT;');
+    await client.query('ALTER TABLE milestones ADD COLUMN IF NOT EXISTS submitted_at TIMESTAMP;');
+    await client.query('ALTER TABLE milestones ADD COLUMN IF NOT EXISTS late_days INTEGER DEFAULT 0;');
+    await client.query('ALTER TABLE milestones ADD COLUMN IF NOT EXISTS penalty_amount NUMERIC(10, 2) DEFAULT 0;');
+    await client.query('ALTER TABLE milestones ADD COLUMN IF NOT EXISTS released_amount NUMERIC(10, 2);');
+    await client.query('ALTER TABLE milestones ADD COLUMN IF NOT EXISTS extension_requested_days INTEGER DEFAULT 0;');
+    await client.query('ALTER TABLE milestones ADD COLUMN IF NOT EXISTS extension_reason TEXT;');
+    await client.query('ALTER TABLE milestones ADD COLUMN IF NOT EXISTS extension_status VARCHAR(20);');
+    await client.query('ALTER TABLE milestones ADD COLUMN IF NOT EXISTS extension_requested_at TIMESTAMP;');
+    await client.query('ALTER TABLE milestones ADD COLUMN IF NOT EXISTS extension_response_note TEXT;');
     console.log('Milestone lifecycle columns added.');
 
     // Add new project_status enum values
@@ -165,6 +258,133 @@ async function initDatabase() {
       }
     }
     console.log('Milestone status enum values checked/added.');
+
+    // Normalize milestone plans created by older builds so clients can review them.
+    await client.query(`
+      UPDATE milestones m
+      SET status = 'planning'
+      FROM projects p
+      WHERE m.project_id = p.id
+        AND m.status = 'Pending'
+        AND p.status = 'Planning'
+        AND m.deliverable_url IS NULL;
+    `);
+
+    // Ensure invitations table has columns for the service request flow
+    console.log('Ensuring invitations table has service request columns...');
+    await client.query('ALTER TABLE invitations ADD COLUMN IF NOT EXISTS cover_letter TEXT;');
+    await client.query('ALTER TABLE invitations ADD COLUMN IF NOT EXISTS bid_amount NUMERIC(10, 2);');
+    await client.query('ALTER TABLE invitations ADD COLUMN IF NOT EXISTS delivery_days INT;');
+    await client.query('ALTER TABLE invitations ADD COLUMN IF NOT EXISTS status proposal_status DEFAULT \'pending\';');
+    await client.query('ALTER TABLE invitations ADD COLUMN IF NOT EXISTS counter_bid_amount NUMERIC(10, 2);');
+    await client.query('ALTER TABLE invitations ADD COLUMN IF NOT EXISTS counter_delivery_days INTEGER;');
+    await client.query('ALTER TABLE invitations ADD COLUMN IF NOT EXISTS counter_cover_letter TEXT;');
+    await client.query('ALTER TABLE invitations ADD COLUMN IF NOT EXISTS counter_initiated_by UUID;');
+    await client.query('ALTER TABLE invitations ADD COLUMN IF NOT EXISTS paid_at TIMESTAMP DEFAULT NULL;');
+    await client.query("ALTER TABLE proposals ADD COLUMN IF NOT EXISTS payment_status VARCHAR(20) DEFAULT 'unpaid';");
+    await client.query("ALTER TABLE invitations ADD COLUMN IF NOT EXISTS payment_status VARCHAR(20) DEFAULT 'unpaid';");
+    await client.query('ALTER TABLE transactions ADD COLUMN IF NOT EXISTS proposal_id UUID;');
+    await client.query('ALTER TABLE transactions ADD COLUMN IF NOT EXISTS invitation_id UUID;');
+    await client.query('ALTER TABLE transactions ADD COLUMN IF NOT EXISTS milestone_id UUID;');
+    await client.query("ALTER TABLE transactions ADD COLUMN IF NOT EXISTS funding_source VARCHAR(20) DEFAULT 'card';");
+    await client.query('ALTER TABLE transactions ADD COLUMN IF NOT EXISTS wallet_amount NUMERIC(10, 2) DEFAULT 0;');
+    await client.query('ALTER TABLE transactions ADD COLUMN IF NOT EXISTS external_amount NUMERIC(10, 2) DEFAULT 0;');
+    await client.query('ALTER TABLE projects ADD COLUMN IF NOT EXISTS proposal_id UUID;');
+    await client.query('ALTER TABLE projects ADD COLUMN IF NOT EXISTS invitation_id UUID;');
+    await client.query(`
+      UPDATE projects p
+      SET duration_days = COALESCE(j.duration_days, pr.delivery_days)
+      FROM proposals pr
+      JOIN job_posts j ON j.id = pr.job_id
+      WHERE p.proposal_id = pr.id
+        AND p.duration_days IS NULL;
+    `);
+    await client.query(`
+      UPDATE projects p
+      SET duration_days = i.delivery_days
+      FROM invitations i
+      WHERE p.invitation_id = i.id
+        AND p.duration_days IS NULL;
+    `);
+    await client.query('CREATE UNIQUE INDEX IF NOT EXISTS idx_transactions_funded_proposal ON transactions(proposal_id) WHERE proposal_id IS NOT NULL AND status = \'completed\';');
+    await client.query('CREATE UNIQUE INDEX IF NOT EXISTS idx_transactions_funded_invitation ON transactions(invitation_id) WHERE invitation_id IS NOT NULL AND status = \'completed\';');
+    await client.query("CREATE UNIQUE INDEX IF NOT EXISTS idx_transactions_released_milestone ON transactions(milestone_id) WHERE milestone_id IS NOT NULL AND type = 'escrow_release' AND status = 'completed';");
+    await client.query('CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_proposal ON projects(proposal_id) WHERE proposal_id IS NOT NULL;');
+    await client.query('CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_invitation ON projects(invitation_id) WHERE invitation_id IS NOT NULL;');
+    console.log('Invitations table columns checked/added successfully.');
+    // Ensure users table has acc_status column
+    console.log('Ensuring users table has "acc_status" column...');
+    await client.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS acc_status BOOLEAN DEFAULT true;');
+
+    // Ensure services table has status column
+    console.log('Ensuring services table has "status" column...');
+    await client.query("ALTER TABLE services ADD COLUMN IF NOT EXISTS status VARCHAR(50) DEFAULT 'pending';");
+
+    // (Covered by requiredJobStatuses loop above)
+
+
+    // Add new notification types to notification_type enum if they don't exist
+    const newNotifTypes = ['new_service_request', 'counter_service_request', 'service_request_accepted', 'service_request_paid'];
+    for (const val of newNotifTypes) {
+      try {
+        await client.query(`ALTER TYPE notification_type ADD VALUE '${val}';`);
+      } catch (err) {
+        if (err.code !== '42710') {
+          console.warn(`Non-fatal warning adding ${val} to notification_type enum:`, err.message);
+        }
+      }
+    }
+    // Drop old reviews table and its custom enum type
+    console.log('Removing old reviews table and review_direction enum type if they exist...');
+    await client.query('DROP TABLE IF EXISTS reviews CASCADE;');
+    await client.query('DROP TYPE IF EXISTS review_direction CASCADE;');
+
+    // Ensure review table exists (singular)
+    console.log('Ensuring review table exists...');
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS review (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        creator_id UUID REFERENCES users(id) ON DELETE CASCADE,
+        target_id UUID REFERENCES users(id) ON DELETE CASCADE,
+        review TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
+    // Ensure images and video_link columns exist in services table
+    console.log('Ensuring services table has "images" and "video_link" columns...');
+    await client.query(`
+      ALTER TABLE services ADD COLUMN IF NOT EXISTS images TEXT;
+    `);
+    await client.query(`
+      ALTER TABLE services ADD COLUMN IF NOT EXISTS video_link VARCHAR(255);
+    `);
+    // Ensure messages table has is_removed column
+    console.log('Ensuring messages table has "is_removed" column...');
+    await client.query('ALTER TABLE messages ADD COLUMN IF NOT EXISTS is_removed BOOLEAN DEFAULT false;');
+    
+    // Ensure disputes table exists and has necessary enhancement columns
+    console.log('Ensuring disputes table exists and has lifecycle columns...');
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS disputes (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        creator_id UUID NOT NULL REFERENCES users(id),
+        target_id UUID NOT NULL REFERENCES users(id),
+        project_id UUID NOT NULL REFERENCES projects(id),
+        message_log TEXT,
+        type VARCHAR(255),
+        title VARCHAR(255) NOT NULL,
+        content TEXT,
+        is_resolved BOOLEAN DEFAULT false,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+    await client.query('ALTER TABLE disputes ADD COLUMN IF NOT EXISTS evidence_urls TEXT;');
+    await client.query('ALTER TABLE disputes ADD COLUMN IF NOT EXISTS resolution_type VARCHAR(50);');
+    await client.query('ALTER TABLE disputes ADD COLUMN IF NOT EXISTS admin_notes TEXT;');
+    await client.query('ALTER TABLE disputes ADD COLUMN IF NOT EXISTS resolved_at TIMESTAMP;');
+
+    console.log('Rating, Review & Dispute tables and attributes checked/added successfully.');
 
 
 

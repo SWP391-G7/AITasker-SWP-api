@@ -1,4 +1,5 @@
 const { pool } = require('../config/db')
+const { sendNotification } = require('../utils/notificationService')
 
 /**
  * @desc    Create a new proposal for a job post
@@ -98,6 +99,26 @@ const createProposal = async (req, res, next) => {
     ]
 
     const result = await pool.query(insertQuery, values)
+
+    // Trigger Notification
+    try {
+      const jobInfo = await pool.query('SELECT title, client_id FROM job_posts WHERE id = $1', [job_id]);
+      const expertInfo = await pool.query('SELECT full_name FROM users WHERE id = $1', [userId]);
+      if (jobInfo.rows.length > 0) {
+        const jobTitle = jobInfo.rows[0].title;
+        const clientId = jobInfo.rows[0].client_id;
+        const expertName = expertInfo.rows[0]?.full_name || 'An expert';
+
+        await sendNotification(clientId, {
+          title: "New Proposal Received",
+          message: `Expert ${expertName} has submitted a new proposal for your job "${jobTitle}".`,
+          type: "new_proposal",
+          referenceId: result.rows[0].id
+        });
+      }
+    } catch (notifErr) {
+      console.error('[Notification Trigger Error] new_proposal:', notifErr.message);
+    }
 
     return res.status(201).json({
       success: true,
@@ -445,74 +466,83 @@ const updateProposalStatus = async (req, res, next) => {
       return next(err);
     }
 
-    // 2. Start transaction
-    await pool.query('BEGIN');
-
-    // 3. If approving a counter, adopt the counter_bid_amount as the final bid
-    let finalBidAmount = proposal.bid_amount;
-    if (status === 'accepted' && proposal.status === 'countered' && proposal.counter_bid_amount) {
-      finalBidAmount = proposal.counter_bid_amount;
-    }
-
-    // 4. Update the proposal status
-    const updateProposalQuery = `
-      UPDATE proposals
-      SET status = $1, bid_amount = $2
-      WHERE id = $3
-      RETURNING *;
-    `;
-    const updatedProposalRes = await pool.query(updateProposalQuery, [status, finalBidAmount, id]);
-    const updatedProposal = updatedProposalRes.rows[0];
-
-    let createdProject = null;
-
-    // 5. If status is accepted, handle job status and project creation
+    // 1.5 Check if another proposal has already been accepted or if the job is closed/filled
     if (status === 'accepted') {
-      if (start_project === false || isExpert) {
-        // Expert approving → job goes to pending; client must click Create Project
-        const updateJobQuery = `
-          UPDATE job_posts
-          SET status = 'pending'
-          WHERE id = $1;
-        `;
-        await pool.query(updateJobQuery, [proposal.job_id]);
-      } else {
-        // Client accepting with immediate start → close job and auto-create project
-        const updateJobQuery = `
-          UPDATE job_posts
-          SET status = 'closed'
-          WHERE id = $1;
-        `;
-        await pool.query(updateJobQuery, [proposal.job_id]);
-
-        // Auto create project
-        const insertProjectQuery = `
-          INSERT INTO projects (expert_id, client_id, type, status, total_amount, title, description)
-          VALUES ($1, $2, 'fixed_milestone', 'active', $3, $4, $5)
-          RETURNING *;
-        `;
-        const projectRes = await pool.query(insertProjectQuery, [
-          proposal.expert_id,
-          proposal.client_id,
-          finalBidAmount,
-          proposal.job_title,
-          proposal.job_description
-        ]);
-        createdProject = projectRes.rows[0];
+      const acceptedCheck = await pool.query(
+        "SELECT id FROM proposals WHERE job_id = $1 AND status = 'accepted' AND id <> $2",
+        [proposal.job_id, id]
+      );
+      if (acceptedCheck.rows.length > 0) {
+        const err = new Error('Cannot accept proposal: Another proposal has already been accepted for this job.');
+        err.statusCode = 400;
+        return next(err);
+      }
+      if (proposal.job_status === 'closed') {
+        const err = new Error('Cannot accept proposal: The job post is already closed/filled.');
+        err.statusCode = 400;
+        return next(err);
       }
     }
 
-    await pool.query('COMMIT');
+    // 2. Start transaction
+    const dbClient = await pool.connect();
+    let updatedProposal;
+
+    try {
+      await dbClient.query('BEGIN');
+
+      // 3. If approving a counter, adopt the counter_bid_amount as the final bid
+      let finalBidAmount = proposal.bid_amount;
+      if (status === 'accepted' && proposal.status === 'countered' && proposal.counter_bid_amount) {
+        finalBidAmount = proposal.counter_bid_amount;
+      }
+
+      // 4. Update the proposal status
+      const updateProposalQuery = `
+        UPDATE proposals
+        SET status = $1, bid_amount = $2
+        WHERE id = $3
+        RETURNING *;
+      `;
+      const updatedProposalRes = await dbClient.query(updateProposalQuery, [status, finalBidAmount, id]);
+      updatedProposal = updatedProposalRes.rows[0];
+
+      // Acceptance confirms terms only; funding and project creation are separate.
+      if (status === 'accepted') {
+        await dbClient.query("UPDATE job_posts SET status = 'pending' WHERE id = $1", [proposal.job_id]);
+      }
+
+      await dbClient.query('COMMIT');
+    } catch (txErr) {
+      await dbClient.query('ROLLBACK');
+      throw txErr;
+    } finally {
+      dbClient.release();
+    }
+
+    // Trigger Notifications
+    try {
+      if (status === 'accepted') {
+        // Notify Expert that their proposal was accepted
+        await sendNotification(proposal.expert_id, {
+          title: "Proposal Accepted",
+          message: `Your proposal for the job "${proposal.job_title}" has been accepted.`,
+          type: "proposal_accepted",
+          referenceId: proposal.id
+        });
+      }
+    } catch (notifErr) {
+      console.error('[Notification Trigger Error] updateProposalStatus:', notifErr.message);
+    }
 
     return res.status(200).json({
       success: true,
       message: `Proposal status updated to ${status} successfully.`,
       proposal: updatedProposal,
-      project: createdProject
+      project: null
     });
 
   } catch (error) {
-    await pool.query('ROLLBACK');
     return next(error);
   }
 };
@@ -592,6 +622,29 @@ const counterProposal = async (req, res, next) => {
       userId,
       id
     ]);
+
+    // Trigger Notification
+    try {
+      const initiatorRes = await pool.query('SELECT full_name FROM users WHERE id = $1', [userId]);
+      const initiatorName = initiatorRes.rows[0]?.full_name || 'Someone';
+
+      const jobRes = await pool.query('SELECT title FROM job_posts WHERE id = $1', [proposal.job_id]);
+      const jobTitle = jobRes.rows[0]?.title || 'your job';
+
+      const recipientId = isClient ? proposal.expert_id : proposal.client_id;
+      const messageText = isClient 
+        ? `Client ${initiatorName} has sent a counter-proposal for "${jobTitle}"`
+        : `Expert ${initiatorName} has send a counter-proposal for "${jobTitle}"`;
+
+      await sendNotification(recipientId, {
+        title: "New Counter Proposal",
+        message: messageText,
+        type: "counter_proposal",
+        referenceId: result.rows[0].id
+      });
+    } catch (notifErr) {
+      console.error('[Notification Trigger Error] counterProposal:', notifErr.message);
+    }
 
     return res.status(200).json({
       success: true,

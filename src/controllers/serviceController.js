@@ -22,7 +22,9 @@ const createService = async (req, res, next) => {
     price,
     pricing_type,
     delivery_days,
-    tags
+    tags,
+    images,
+    videoLink
   } = req.body
 
   // 2. Input Validation
@@ -67,6 +69,14 @@ const createService = async (req, res, next) => {
     errors.tags = 'Tags cannot exceed 255 characters'
   }
 
+  if (images !== undefined && typeof images !== 'string') {
+    errors.images = 'Images must be a JSON string'
+  }
+
+  if (videoLink !== undefined && typeof videoLink !== 'string') {
+    errors.video_link = 'Video link must be a string'
+  }
+
   if (Object.keys(errors).length > 0) {
     const err = new Error('Validation failed')
     err.statusCode = 400
@@ -90,9 +100,13 @@ const createService = async (req, res, next) => {
         price,
         pricing_type,
         delivery_days,
-        tags
+        tags,
+        images,
+        video_link,
+        status
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9,
+      'approved') 
       RETURNING *;
     `
 
@@ -103,7 +117,9 @@ const createService = async (req, res, next) => {
       parsedPrice,
       pricing_type,
       parsedDeliveryDays,
-      tags ? tags.trim() : null
+      tags ? tags.trim() : null,
+      images || null,
+      videoLink || null
     ]
 
     const result = await pool.query(insertQuery, values)
@@ -156,8 +172,11 @@ const getServiceById = async (req, res, next) => {
 
   try {
     const query = `
-      SELECT * FROM services
-      WHERE id = $1;
+      SELECT s.*, e.professional_title, u.full_name as expert_name, u.avatar_url as expert_avatar
+      FROM services s
+      LEFT JOIN users u ON s.expert_id = u.id
+      LEFT JOIN expert_profiles e ON u.id = e.id
+      WHERE s.id = $1;
     `
 
     const result = await pool.query(query, [id])
@@ -186,7 +205,7 @@ const getServiceById = async (req, res, next) => {
 const updateService = async (req, res, next) => {
   const { id } = req.params
   const userId = req.user.id
-  const { title, description, price, pricing_type, delivery_days, tags } = req.body
+  const { title, description, price, pricing_type, delivery_days, tags, images, videoLink } = req.body
 
   try {
     // Check if service exists and belongs to current user
@@ -198,7 +217,8 @@ const updateService = async (req, res, next) => {
       return next(err)
     }
 
-    if (serviceCheck.rows[0].expert_id !== userId) {
+    const userRole = req.user.role
+    if (serviceCheck.rows[0].expert_id !== userId && userRole !== 'admin') {
       const err = new Error('Forbidden: You can only update your own services')
       err.statusCode = 403
       return next(err)
@@ -250,6 +270,14 @@ const updateService = async (req, res, next) => {
       errors.tags = 'Tags cannot exceed 255 characters'
     }
 
+    if (images !== undefined && typeof images !== 'string') {
+      errors.images = 'Images must be a JSON string'
+    }
+
+    if (videoLink !== undefined && typeof videoLink !== 'string') {
+      errors.video_link = 'Video link must be a string'
+    }
+
     if (Object.keys(errors).length > 0) {
       const err = new Error('Validation failed')
       err.statusCode = 400
@@ -295,6 +323,18 @@ const updateService = async (req, res, next) => {
     if (tags !== undefined) {
       updates.push(`tags = $${paramCount}`)
       values.push(tags ? tags.trim() : null)
+      paramCount++
+    }
+
+    if (images !== undefined) {
+      updates.push(`images = $${paramCount}`)
+      values.push(images)
+      paramCount++
+    }
+
+    if (videoLink !== undefined) {
+      updates.push(`video_link = $${paramCount}`)
+      values.push(videoLink)
       paramCount++
     }
 
@@ -345,7 +385,8 @@ const deleteService = async (req, res, next) => {
       return next(err)
     }
 
-    if (serviceCheck.rows[0].expert_id !== userId) {
+    const userRole = req.user.role
+    if (serviceCheck.rows[0].expert_id !== userId && userRole !== 'admin') {
       const err = new Error('Forbidden: You can only delete your own services')
       err.statusCode = 403
       return next(err)

@@ -3,8 +3,8 @@ const router = express.Router();
 const { getUserProfile, updateClientProfile, updateExpertProfile, updateUserRole } = require('../controllers/profileController');
 const { protect } = require('../middleware/authMiddleware');
 
-// Get profile by user ID
-router.get('/:userId', protect, getUserProfile);
+// Get profile by user ID (public access)
+router.get('/:userId', getUserProfile);
 
 // Update user role
 router.put('/role', protect, updateUserRole);

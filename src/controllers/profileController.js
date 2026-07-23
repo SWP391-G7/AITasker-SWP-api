@@ -12,7 +12,7 @@ const getUserProfile = async (req, res, next) => {
   try {
     // 1. Fetch user general information
     const userQuery = `
-      SELECT id, full_name, email, role, is_verified, created_at 
+      SELECT id, full_name, email, role, is_verified, created_at, avatar_url, acc_status
       FROM users 
       WHERE id = $1
     `;
@@ -25,6 +25,21 @@ const getUserProfile = async (req, res, next) => {
     }
 
     const user = userRes.rows[0];
+
+    // Project/service counts
+    const projectCountRes = await pool.query(
+      `SELECT COUNT(*) FILTER (WHERE status = 'completed') AS completed,
+              COUNT(*) AS total
+       FROM projects WHERE expert_id = $1`,
+      [userId]
+    );
+    const expertProjectCounts = projectCountRes.rows[0] || { completed: 0, total: 0 };
+
+    const jobCountRes = await pool.query(
+      `SELECT COUNT(*) FROM job_posts WHERE client_id = $1`,
+      [userId]
+    );
+    const postedJobsCount = parseInt(jobCountRes.rows[0]?.count || 0, 10);
 
     // 2. Fetch Client Profile if exists
     const clientQuery = `SELECT * FROM client_profiles WHERE id = $1`;
@@ -63,13 +78,17 @@ const getUserProfile = async (req, res, next) => {
         email: user.email,
         role: user.role,
         isVerified: user.is_verified,
-        createdAt: user.created_at
+        accStatus: user.acc_status,
+        status: user.acc_status === false ? 'Suspended' : 'Active',
+        createdAt: user.created_at,
+        avatarUrl: user.avatar_url
       },
       clientProfile: clientProfile ? {
         id: clientProfile.id,
         companyName: clientProfile.company_name,
         industry: clientProfile.industry,
-        bio: clientProfile.bio
+        bio: clientProfile.bio,
+        budget: clientProfile.budget
       } : null,
       expertProfile: expertProfile ? {
         id: expertProfile.id,
@@ -83,6 +102,9 @@ const getUserProfile = async (req, res, next) => {
       } : null,
       hasClientProfile,
       hasExpertProfile,
+      completedProjects: parseInt(expertProjectCounts.completed || 0, 10),
+      totalProjects: parseInt(expertProjectCounts.total || 0, 10),
+      postedJobsCount,
       services: services.map(s => ({
         id: s.id,
         title: s.title,
@@ -91,7 +113,8 @@ const getUserProfile = async (req, res, next) => {
         pricingType: s.pricing_type,
         deliveryDays: s.delivery_days,
         tags: s.tags,
-        avgRating: s.avg_rating
+        avgRating: s.avg_rating,
+        status: s.status
       })),
       projects: projects.map(p => ({
         id: p.id,
@@ -271,7 +294,7 @@ const updateUserRole = async (req, res, next) => {
       UPDATE users
       SET role = $1
       WHERE id = $2
-      RETURNING id, full_name, email, role, is_verified, created_at;
+      RETURNING id, full_name, email, role, is_verified, created_at, avatar_url;
     `;
     const userRes = await dbClient.query(updateRoleQuery, [role, userId]);
 
@@ -317,7 +340,8 @@ const updateUserRole = async (req, res, next) => {
         email: updatedUser.email,
         role: updatedUser.role,
         isVerified: updatedUser.is_verified,
-        createdAt: updatedUser.created_at
+        createdAt: updatedUser.created_at,
+        avatarUrl: updatedUser.avatar_url
       },
       token
     });

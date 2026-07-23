@@ -1,4 +1,5 @@
 const { verifyToken } = require('../utils/token');
+const { pool } = require('../config/db');
 
 /**
  * Authentication guard middleware to protect secure endpoints
@@ -17,6 +18,15 @@ const protect = async (req, res, next) => {
 
       // Verify token
       const decoded = verifyToken(token);
+
+      // Check if user is active/banned
+      const userRes = await pool.query('SELECT acc_status FROM users WHERE id = $1', [decoded.id]);
+      if (userRes.rows.length === 0 || userRes.rows[0].acc_status === false) {
+        const authError = new Error('Account has been deactivated due to violation.');
+        authError.statusCode = 403;
+        authError.code = 'ACCOUNT_DEACTIVATED';
+        return next(authError);
+      }
 
       // Attach user details to request object
       req.user = {

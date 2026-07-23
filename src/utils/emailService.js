@@ -67,7 +67,48 @@ const sendVerificationCode = async (email, code) => {
   }
 };
 
+const sendPasswordResetEmail = async (email, code) => {
+  try {
+    if (!transporter) {
+      await initializeEmailService();
+    }
+
+    const mailOptions = {
+      from: process.env.EMAIL_FROM || 'noreply@aitasker.com',
+      to: email,
+      subject: 'Password Reset Code - AITasker',
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+          <h2>Password Reset Request</h2>
+          <p>We received a request to reset your password for your AITasker account.</p>
+          <div style="background-color: #f0f0f0; padding: 20px; border-radius: 8px; text-align: center; margin: 20px 0;">
+            <p style="margin: 0; color: #666; font-size: 14px;">Your password reset code is:</p>
+            <p style="margin: 10px 0; font-size: 32px; font-weight: bold; letter-spacing: 5px; color: #007bff;">${code}</p>
+            <p style="margin: 10px 0; color: #666; font-size: 14px;">This code will expire in 15 minutes.</p>
+          </div>
+          <p style="color: #666; font-size: 14px;">If you didn't request a password reset, please ignore this email.</p>
+          <hr style="border: none; border-top: 1px solid #ddd; margin: 20px 0;">
+          <p style="color: #999; font-size: 12px; text-align: center;">© 2026 AITasker. All rights reserved.</p>
+        </div>
+      `
+    };
+
+    const info = await transporter.sendMail(mailOptions);
+
+    if (process.env.NODE_ENV !== 'production') {
+      console.log('Preview URL: %s', nodemailer.getTestMessageUrl(info));
+    }
+
+    return info;
+  } catch (err) {
+    console.error('Error sending password reset email:', err);
+    throw err;
+  }
+};
+
 module.exports = {
   initializeEmailService,
-  sendVerificationCode
+  sendVerificationCode,
+  sendPasswordResetEmail
 };
+

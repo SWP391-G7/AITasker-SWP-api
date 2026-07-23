@@ -1,4 +1,5 @@
 const { pool } = require('../config/db');
+const { sendNotification } = require('../utils/notificationService');
 
 /**
  * @desc    Create a project from an accepted proposal
@@ -90,32 +91,73 @@ const createProject = async (req, res, next) => {
       return next(err);
     }
 
+    if (proposal.payment_status !== 'funded') {
+      const err = new Error('Cannot start project: Client payment has not been secured in escrow');
+      err.statusCode = 400;
+      return next(err);
+    }
+
     // Start Transaction
-    await pool.query('BEGIN');
+    const dbClient = await pool.connect();
+    let project;
 
-    // 1. Create the project
-    const insertQuery = `
-      INSERT INTO projects (expert_id, client_id, type, status, total_amount, title, description)
-      VALUES ($1, $2, 'fixed_milestone', 'Planning', $3, $4, $5)
-      RETURNING *;
-    `;
-    const projectValues = [
-      proposal.expert_id,
-      jobPost.client_id,
-      proposal.bid_amount,
-      jobPost.title,
-      jobPost.description
-    ];
-    const projectRes = await pool.query(insertQuery, projectValues);
-    const project = projectRes.rows[0];
+    try {
+      await dbClient.query('BEGIN');
 
-    // 2. Set job post status to 'closed' instead of deleting it
-    await pool.query(
-      "UPDATE job_posts SET status = 'closed' WHERE id = $1",
-      [jobPost.id]
-    );
+      // 1. Create the project
+      const insertQuery = `
+        INSERT INTO projects (expert_id, client_id, type, status, total_amount, duration_days, title, description, proposal_id)
+        VALUES ($1, $2, 'fixed_milestone', 'Planning', $3, $4, $5, $6, $7)
+        RETURNING *;
+      `;
+      const projectValues = [
+        proposal.expert_id,
+        jobPost.client_id,
+        proposal.bid_amount,
+        jobPost.duration_days || proposal.delivery_days,
+        jobPost.title,
+        jobPost.description,
+        proposal.id
+      ];
+      const projectRes = await dbClient.query(insertQuery, projectValues);
+      project = projectRes.rows[0];
 
-    await pool.query('COMMIT');
+      await dbClient.query(
+        'UPDATE transactions SET project_id = $1 WHERE proposal_id = $2 AND type = \'escrow_deposit\' AND status = \'completed\'',
+        [project.id, proposal.id]
+      );
+
+      // 2. Set job post status to 'closed' instead of deleting it
+      await dbClient.query(
+        "UPDATE job_posts SET status = 'closed' WHERE id = $1",
+        [jobPost.id]
+      );
+
+      await dbClient.query('COMMIT');
+    } catch (txErr) {
+      await dbClient.query('ROLLBACK');
+      throw txErr;
+    } finally {
+      dbClient.release();
+    }
+
+    // Trigger Notifications
+    try {
+      await sendNotification(project.client_id, {
+        title: "New Project Started",
+        message: `A new project for "${project.title}" has been created.`,
+        type: "new_project",
+        referenceId: project.id
+      });
+      await sendNotification(project.expert_id, {
+        title: "New Project Started",
+        message: `A new project for "${project.title}" has been created.`,
+        type: "new_project",
+        referenceId: project.id
+      });
+    } catch (notifErr) {
+      console.error('[Notification Trigger Error] createProject:', notifErr.message);
+    }
 
     return res.status(201).json({
       success: true,
@@ -289,11 +331,33 @@ const updateProject = async (req, res, next) => {
       RETURNING *;
     `;
     const result = await pool.query(updateQuery, [status, id]);
+    const updatedProject = result.rows[0];
+
+    // Trigger Notifications
+    try {
+      const normStatus = String(updatedProject.status).toLowerCase();
+      if (normStatus === 'completed') {
+        await sendNotification(updatedProject.client_id, {
+          title: "Project Completed",
+          message: `Project "${updatedProject.title}" has been marked as completed.`,
+          type: "project_finished",
+          referenceId: updatedProject.id
+        });
+        await sendNotification(updatedProject.expert_id, {
+          title: "Project Completed",
+          message: `Project "${updatedProject.title}" has been marked as completed.`,
+          type: "project_finished",
+          referenceId: updatedProject.id
+        });
+      }
+    } catch (notifErr) {
+      console.error('[Notification Trigger Error] updateProject:', notifErr.message);
+    }
 
     return res.status(200).json({
       success: true,
       message: 'Project updated successfully',
-      project: result.rows[0]
+      project: updatedProject
     });
   } catch (error) {
     return next(error);
