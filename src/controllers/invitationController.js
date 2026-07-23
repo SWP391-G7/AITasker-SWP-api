@@ -332,33 +332,36 @@ const updateInvitationStatus = async (req, res, next) => {
       return next(err)
     }
 
-    await pool.query('BEGIN')
+    const dbClient = await pool.connect()
+    let updatedInvitation
 
-    // Adopt final bid and delivery days if accepting a counter
-    let finalBidAmount = invitation.bid_amount
-    let finalDeliveryDays = invitation.delivery_days
-    if (status === 'accepted' && invitation.status === 'countered') {
-      if (invitation.counter_bid_amount) finalBidAmount = invitation.counter_bid_amount
-      if (invitation.counter_delivery_days) finalDeliveryDays = invitation.counter_delivery_days
+    try {
+      await dbClient.query('BEGIN')
+
+      // Adopt final bid and delivery days if accepting a counter
+      let finalBidAmount = invitation.bid_amount
+      let finalDeliveryDays = invitation.delivery_days
+      if (status === 'accepted' && invitation.status === 'countered') {
+        if (invitation.counter_bid_amount) finalBidAmount = invitation.counter_bid_amount
+        if (invitation.counter_delivery_days) finalDeliveryDays = invitation.counter_delivery_days
+      }
+
+      const updateQuery = `
+        UPDATE invitations
+        SET status = $1, bid_amount = $2, delivery_days = $3
+        WHERE id = $4
+        RETURNING *;
+      `
+      const updatedRes = await dbClient.query(updateQuery, [status, finalBidAmount, finalDeliveryDays, id])
+      updatedInvitation = updatedRes.rows[0]
+
+      await dbClient.query('COMMIT')
+    } catch (txErr) {
+      await dbClient.query('ROLLBACK')
+      throw txErr
+    } finally {
+      dbClient.release()
     }
-
-    const updateQuery = `
-      UPDATE invitations
-      SET status = $1, bid_amount = $2, delivery_days = $3
-      WHERE id = $4
-      RETURNING *;
-    `
-    const updatedRes = await pool.query(updateQuery, [status, finalBidAmount, finalDeliveryDays, id])
-    const updatedInvitation = updatedRes.rows[0]
-
-    let createdProject = null
-
-    if (status === 'accepted') {
-      // Accepting only confirms the terms. Escrow funding is required before
-      // the client can create a project, regardless of who clicked Accept.
-    }
-
-    await pool.query('COMMIT')
 
     // Notifications
     try {
@@ -374,21 +377,6 @@ const updateInvitationStatus = async (req, res, next) => {
         type: "service_request_accepted",
         referenceId: invitation.id
       })
-
-      if (createdProject) {
-        await sendNotification(invitation.client_id, {
-          title: "New Project Started",
-          message: `A new project for service "${invitation.service_title}" has been initiated.`,
-          type: "new_project",
-          referenceId: createdProject.id
-        })
-        await sendNotification(invitation.expert_id, {
-          title: "New Project Started",
-          message: `A new project for service "${invitation.service_title}" has been initiated.`,
-          type: "new_project",
-          referenceId: createdProject.id
-        })
-      }
     } catch (notifErr) {
       console.error('[Notification Trigger Error] updateInvitationStatus:', notifErr.message)
     }
@@ -396,11 +384,9 @@ const updateInvitationStatus = async (req, res, next) => {
     return res.status(200).json({
       success: true,
       message: `Request status updated to ${status} successfully.`,
-      invitation: updatedInvitation,
-      project: createdProject
+      invitation: updatedInvitation
     })
   } catch (error) {
-    await pool.query('ROLLBACK')
     return next(error)
   }
 }
@@ -567,32 +553,41 @@ const startProject = async (req, res, next) => {
       return next(err)
     }
 
-    await pool.query('BEGIN')
+    const dbClient = await pool.connect()
+    let project
 
-    // Create the project
-    const insertProjectQuery = `
-      INSERT INTO projects (expert_id, client_id, type, status, total_amount, duration_days, title, description, invitation_id)
-      VALUES ($1, $2, 'fixed_milestone', 'Planning', $3, $4, $5, $6, $7)
-      RETURNING *;
-    `
-    const projectRes = await pool.query(insertProjectQuery, [
-      invitation.expert_id,
-      invitation.client_id,
-      invitation.bid_amount,
-      invitation.delivery_days,
-      invitation.service_title,
-      invitation.cover_letter || invitation.service_description,
-      invitation.id
-    ])
-    const project = projectRes.rows[0]
+    try {
+      await dbClient.query('BEGIN')
 
-    await pool.query(
-      "UPDATE transactions SET project_id = $1 WHERE invitation_id = $2 AND type = 'escrow_deposit' AND status = 'completed'",
-      [project.id, invitation.id]
-    )
+      // Create the project
+      const insertProjectQuery = `
+        INSERT INTO projects (expert_id, client_id, type, status, total_amount, duration_days, title, description, invitation_id)
+        VALUES ($1, $2, 'fixed_milestone', 'Planning', $3, $4, $5, $6, $7)
+        RETURNING *;
+      `
+      const projectRes = await dbClient.query(insertProjectQuery, [
+        invitation.expert_id,
+        invitation.client_id,
+        invitation.bid_amount,
+        invitation.delivery_days,
+        invitation.service_title,
+        invitation.cover_letter || invitation.service_description,
+        invitation.id
+      ])
+      project = projectRes.rows[0]
 
-    // Set invitation status to something complete if needed or keep it accepted. We'll keep it accepted.
-    await pool.query('COMMIT')
+      await dbClient.query(
+        "UPDATE transactions SET project_id = $1 WHERE invitation_id = $2 AND type = 'escrow_deposit' AND status = 'completed'",
+        [project.id, invitation.id]
+      )
+
+      await dbClient.query('COMMIT')
+    } catch (txErr) {
+      await dbClient.query('ROLLBACK')
+      throw txErr
+    } finally {
+      dbClient.release()
+    }
 
     // Notifications
     try {
@@ -618,7 +613,6 @@ const startProject = async (req, res, next) => {
       project
     })
   } catch (error) {
-    await pool.query('ROLLBACK')
     return next(error)
   }
 }

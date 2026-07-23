@@ -7,13 +7,6 @@ async function getNotifications(req, res, next) {
   try {
     const userId = req.user.id;
 
-    // Auto-delete already-read notifications from DB on page load
-    const deleteSql = `
-      DELETE FROM notifications 
-      WHERE user_id = $1 AND is_read = true;
-    `;
-    await query(deleteSql, [userId]);
-
     const sql = `
       SELECT * FROM notifications 
       WHERE user_id = $1 
@@ -37,7 +30,7 @@ async function getNotifications(req, res, next) {
       unreadCount
     });
   } catch (error) {
-    next(error);
+    return next(error);
   }
 }
 
@@ -69,7 +62,7 @@ async function markAsRead(req, res, next) {
       notification: result.rows[0]
     });
   } catch (error) {
-    next(error);
+    return next(error);
   }
 }
 
@@ -94,7 +87,7 @@ async function markAllAsRead(req, res, next) {
       count: result.rows.length
     });
   } catch (error) {
-    next(error);
+    return next(error);
   }
 }
 

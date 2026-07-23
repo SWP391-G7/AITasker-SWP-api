@@ -79,36 +79,44 @@ const submitMilestonePlan = async (req, res, next) => {
     const projectDuration = parseInt(project.duration_days, 10);
     const extensionRequested = !isNaN(projectDuration) && projectDuration > 0 && planDuration > projectDuration;
 
-    await pool.query('BEGIN');
+    const dbClient = await pool.connect();
+    try {
+      await dbClient.query('BEGIN');
 
-    // Delete any existing planning / change_requested / Pending / Declined milestones (clean slate on re-submit)
-    await pool.query(
-      "DELETE FROM milestones WHERE project_id = $1 AND status IN ('planning', 'change_requested', 'Pending', 'Declined')",
-      [projectId]
-    );
-
-    // Insert new milestones in order
-    const created = [];
-    for (let i = 0; i < milestones.length; i++) {
-      const m   = milestones[i];
-      const row = await pool.query(
-        `INSERT INTO milestones
-           (project_id, title, content, amount, delivery_days, status, position)
-         VALUES ($1, $2, $3, $4, $5, 'planning', $6)
-         RETURNING *;`,
-        [
-          projectId,
-          String(m.title).trim(),
-          m.content ? String(m.content).trim() : null,
-          parseFloat(m.amount),
-          parseInt(m.delivery_days, 10),
-          i + 1,
-        ]
+      // Delete any existing planning / change_requested / Pending / Declined milestones (clean slate on re-submit)
+      await dbClient.query(
+        "DELETE FROM milestones WHERE project_id = $1 AND status IN ('planning', 'change_requested', 'Pending', 'Declined')",
+        [projectId]
       );
-      created.push(row.rows[0]);
-    }
 
-    await pool.query('COMMIT');
+      // Insert new milestones in order
+      const created = [];
+      for (let i = 0; i < milestones.length; i++) {
+        const m   = milestones[i];
+        const row = await dbClient.query(
+          `INSERT INTO milestones
+             (project_id, title, content, amount, delivery_days, status, position)
+           VALUES ($1, $2, $3, $4, $5, 'planning', $6)
+           RETURNING *;`,
+          [
+            projectId,
+            String(m.title).trim(),
+            m.content ? String(m.content).trim() : null,
+            parseFloat(m.amount),
+            parseInt(m.delivery_days, 10),
+            i + 1,
+          ]
+        );
+        created.push(row.rows[0]);
+      }
+
+      await dbClient.query('COMMIT');
+    } catch (txError) {
+      await dbClient.query('ROLLBACK');
+      throw txError;
+    } finally {
+      dbClient.release();
+    }
 
     // Trigger Notification
     try {
@@ -137,7 +145,6 @@ const submitMilestonePlan = async (req, res, next) => {
       requestedDurationDays: extensionRequested ? planDuration : null,
     });
   } catch (error) {
-    await pool.query('ROLLBACK');
     return next(error);
   }
 };
@@ -306,19 +313,27 @@ const requestPlanChanges = async (req, res, next) => {
       return next(err);
     }
 
-    await pool.query('BEGIN');
+    const dbClient = await pool.connect();
+    try {
+      await dbClient.query('BEGIN');
 
-    const updated = [];
-    for (const row of planningRes.rows) {
-      const note = (notes && notes[row.id]) ? String(notes[row.id]).trim() : null;
-      const r = await pool.query(
-        "UPDATE milestones SET status = 'change_requested', change_request_note = $1 WHERE id = $2 RETURNING *;",
-        [note, row.id]
-      );
-      updated.push(r.rows[0]);
+      const updated = [];
+      for (const row of planningRes.rows) {
+        const note = (notes && notes[row.id]) ? String(notes[row.id]).trim() : null;
+        const r = await dbClient.query(
+          "UPDATE milestones SET status = 'change_requested', change_request_note = $1 WHERE id = $2 RETURNING *;",
+          [note, row.id]
+        );
+        updated.push(r.rows[0]);
+      }
+
+      await dbClient.query('COMMIT');
+    } catch (txErr) {
+      await dbClient.query('ROLLBACK');
+      throw txErr;
+    } finally {
+      dbClient.release();
     }
-
-    await pool.query('COMMIT');
 
     return res.status(200).json({
       success: true,
@@ -326,7 +341,6 @@ const requestPlanChanges = async (req, res, next) => {
       milestones: updated,
     });
   } catch (error) {
-    await pool.query('ROLLBACK');
     return next(error);
   }
 };
@@ -504,8 +518,8 @@ const startMilestone = async (req, res, next) => {
       return next(err);
     }
 
-    if (milestone.status !== 'planned') {
-      const err = new Error('Milestone must be in "planned" state to start');
+    if (milestone.status !== 'planned' && milestone.status !== 'Approved') {
+      const err = new Error('Milestone must be in "planned" or "Approved" state to start');
       err.statusCode = 400;
       return next(err);
     }
@@ -1009,47 +1023,58 @@ const payMilestone = async (req, res, next) => {
       return next(err);
     }
 
-    await pool.query('BEGIN');
+    const dbClient = await pool.connect();
+    let allFinished = false;
+    let updatedMilestone;
 
-    // Mark milestone as Finished
-    const updatedMilestoneRes = await pool.query(
-      "UPDATE milestones SET status = 'Finished' WHERE id = $1 RETURNING *;",
-      [id]
-    );
-    const updatedMilestone = updatedMilestoneRes.rows[0];
+    try {
+      await dbClient.query('BEGIN');
 
-    // Log transaction
-    const transactionRes = await pool.query(
-      `INSERT INTO transactions (project_id, milestone_id, sender_id, receiver_id, amount, type, status, funding_source, complete_at)
-       VALUES ($1, $2, $3, $4, $5, 'escrow_release', 'completed', 'escrow', CURRENT_TIMESTAMP) RETURNING *;`,
-      [milestone.project_id, milestone.id, milestone.client_id, milestone.expert_id, milestone.amount]
-    );
-    const transaction = transactionRes.rows[0];
+      // Mark milestone as Finished
+      const updatedMilestoneRes = await dbClient.query(
+        "UPDATE milestones SET status = 'Finished' WHERE id = $1 RETURNING *;",
+        [id]
+      );
+      updatedMilestone = updatedMilestoneRes.rows[0];
 
-    // Log payment record
-    await pool.query(
-      `INSERT INTO payments (project_id, transaction_id, user_id, amount, type)
-       VALUES ($1, $2, $3, $4, 'momo');`,
-      [milestone.project_id, transaction.id, milestone.client_id, milestone.amount]
-    );
+      // Log transaction
+      const transactionRes = await dbClient.query(
+        `INSERT INTO transactions (project_id, milestone_id, sender_id, receiver_id, amount, type, status, funding_source, complete_at)
+         VALUES ($1, $2, $3, $4, $5, 'escrow_release', 'completed', 'escrow', CURRENT_TIMESTAMP) RETURNING *;`,
+        [milestone.project_id, milestone.id, milestone.client_id, milestone.expert_id, milestone.amount]
+      );
+      const transaction = transactionRes.rows[0];
 
-    // Check if ALL milestones are now Finished → complete the project
-    const allMilestonesRes = await pool.query(
-      'SELECT status FROM milestones WHERE project_id = $1;',
-      [milestone.project_id]
-    );
-    const allFinished =
-      allMilestonesRes.rows.length > 0 &&
-      allMilestonesRes.rows.every((m) => m.status === 'Finished');
+      // Log payment record
+      await dbClient.query(
+        `INSERT INTO payments (project_id, transaction_id, user_id, amount, type)
+         VALUES ($1, $2, $3, $4, 'momo');`,
+        [milestone.project_id, transaction.id, milestone.client_id, milestone.amount]
+      );
 
-    if (allFinished) {
-      await pool.query(
-        "UPDATE projects SET status = 'Completed', end_date = CURRENT_TIMESTAMP WHERE id = $1;",
+      // Check if ALL milestones are now Finished → complete the project
+      const allMilestonesRes = await dbClient.query(
+        'SELECT status FROM milestones WHERE project_id = $1;',
         [milestone.project_id]
       );
-    }
+      allFinished =
+        allMilestonesRes.rows.length > 0 &&
+        allMilestonesRes.rows.every((m) => m.status === 'Finished');
 
-    await pool.query('COMMIT');
+      if (allFinished) {
+        await dbClient.query(
+          "UPDATE projects SET status = 'Completed', end_date = CURRENT_TIMESTAMP WHERE id = $1;",
+          [milestone.project_id]
+        );
+      }
+
+      await dbClient.query('COMMIT');
+    } catch (txErr) {
+      await dbClient.query('ROLLBACK');
+      throw txErr;
+    } finally {
+      dbClient.release();
+    }
 
     // Trigger Notifications
     try {
@@ -1399,10 +1424,10 @@ const startProject = async (req, res, next) => {
       return next(err);
     }
 
-    const allApproved = milestonesCheck.rows.every(m => m.status === 'Approved');
+    const allApproved = milestonesCheck.rows.every(m => m.status === 'Approved' || m.status === 'planned');
 
     if (!allApproved) {
-      const err = new Error('Cannot start project: All milestones must be Approved');
+      const err = new Error('Cannot start project: All milestones must be Approved or planned');
       err.statusCode = 400;
       return next(err);
     }

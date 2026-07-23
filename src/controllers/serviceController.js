@@ -217,7 +217,8 @@ const updateService = async (req, res, next) => {
       return next(err)
     }
 
-    if (serviceCheck.rows[0].expert_id !== userId) {
+    const userRole = req.user.role
+    if (serviceCheck.rows[0].expert_id !== userId && userRole !== 'admin') {
       const err = new Error('Forbidden: You can only update your own services')
       err.statusCode = 403
       return next(err)
@@ -384,7 +385,8 @@ const deleteService = async (req, res, next) => {
       return next(err)
     }
 
-    if (serviceCheck.rows[0].expert_id !== userId) {
+    const userRole = req.user.role
+    if (serviceCheck.rows[0].expert_id !== userId && userRole !== 'admin') {
       const err = new Error('Forbidden: You can only delete your own services')
       err.statusCode = 403
       return next(err)

@@ -38,8 +38,11 @@ const searchEntities = async (req, res, next) => {
     industry,
     companyName,
     ratingMin,
-    ratingMax
+    ratingMax,
+    includeClosed
   } = req.query;
+
+  const showClosed = includeClosed === 'true' || includeClosed === true;
 
   let queryText = '';
   const values = [];
@@ -68,7 +71,7 @@ const searchEntities = async (req, res, next) => {
         queryText += ` AND j.status = $${values.length}`;
       } else {
         queryText += " AND j.status != 'pending' AND j.status != 'removed' AND j.status != 'rejected'";
-        if (!includeClosed) {
+        if (!showClosed) {
           queryText += " AND j.status != 'closed'";
         }
       }

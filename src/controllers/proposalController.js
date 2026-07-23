@@ -485,60 +485,51 @@ const updateProposalStatus = async (req, res, next) => {
     }
 
     // 2. Start transaction
-    await pool.query('BEGIN');
+    const dbClient = await pool.connect();
+    let updatedProposal;
 
-    // 3. If approving a counter, adopt the counter_bid_amount as the final bid
-    let finalBidAmount = proposal.bid_amount;
-    if (status === 'accepted' && proposal.status === 'countered' && proposal.counter_bid_amount) {
-      finalBidAmount = proposal.counter_bid_amount;
+    try {
+      await dbClient.query('BEGIN');
+
+      // 3. If approving a counter, adopt the counter_bid_amount as the final bid
+      let finalBidAmount = proposal.bid_amount;
+      if (status === 'accepted' && proposal.status === 'countered' && proposal.counter_bid_amount) {
+        finalBidAmount = proposal.counter_bid_amount;
+      }
+
+      // 4. Update the proposal status
+      const updateProposalQuery = `
+        UPDATE proposals
+        SET status = $1, bid_amount = $2
+        WHERE id = $3
+        RETURNING *;
+      `;
+      const updatedProposalRes = await dbClient.query(updateProposalQuery, [status, finalBidAmount, id]);
+      updatedProposal = updatedProposalRes.rows[0];
+
+      // Acceptance confirms terms only; funding and project creation are separate.
+      if (status === 'accepted') {
+        await dbClient.query("UPDATE job_posts SET status = 'pending' WHERE id = $1", [proposal.job_id]);
+      }
+
+      await dbClient.query('COMMIT');
+    } catch (txErr) {
+      await dbClient.query('ROLLBACK');
+      throw txErr;
+    } finally {
+      dbClient.release();
     }
-
-    // 4. Update the proposal status
-    const updateProposalQuery = `
-      UPDATE proposals
-      SET status = $1, bid_amount = $2
-      WHERE id = $3
-      RETURNING *;
-    `;
-    const updatedProposalRes = await pool.query(updateProposalQuery, [status, finalBidAmount, id]);
-    const updatedProposal = updatedProposalRes.rows[0];
-
-    let createdProject = null;
-
-    // Acceptance confirms terms only; funding and project creation are separate.
-    if (status === 'accepted') {
-      await pool.query("UPDATE job_posts SET status = 'pending' WHERE id = $1", [proposal.job_id]);
-    }
-
-    await pool.query('COMMIT');
 
     // Trigger Notifications
     try {
       if (status === 'accepted') {
-        // 1. Notify Expert that their proposal was accepted
+        // Notify Expert that their proposal was accepted
         await sendNotification(proposal.expert_id, {
           title: "Proposal Accepted",
           message: `Your proposal for the job "${proposal.job_title}" has been accepted.`,
           type: "proposal_accepted",
           referenceId: proposal.id
         });
-
-        // 2. Notify both Client and Expert about the new project
-        if (createdProject) {
-          await sendNotification(proposal.client_id, {
-            title: "New Project Started",
-            message: `A new project for "${proposal.job_title}" has been initiated.`,
-            type: "new_project",
-            referenceId: createdProject.id
-          });
-
-          await sendNotification(proposal.expert_id, {
-            title: "New Project Started",
-            message: `A new project for "${proposal.job_title}" has been initiated.`,
-            type: "new_project",
-            referenceId: createdProject.id
-          });
-        }
       }
     } catch (notifErr) {
       console.error('[Notification Trigger Error] updateProposalStatus:', notifErr.message);
@@ -548,11 +539,10 @@ const updateProposalStatus = async (req, res, next) => {
       success: true,
       message: `Proposal status updated to ${status} successfully.`,
       proposal: updatedProposal,
-      project: createdProject
+      project: null
     });
 
   } catch (error) {
-    await pool.query('ROLLBACK');
     return next(error);
   }
 };

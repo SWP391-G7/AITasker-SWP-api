@@ -284,19 +284,15 @@ const mockChargeCard = async (req, res, next) => {
       try {
         const parsedData = JSON.parse(data);
         if (webhookRes.statusCode === 200 && parsedData.success) {
-          // Build redirect URL based on payment type
-          let redirectUrl;
-          if (payload.type === 'invitation') {
-            redirectUrl = `/service-requests/${payload.invitationId}?payment=success`;
-          } else {
-            redirectUrl = `/client/projects/${payload.jobId}?payment=success&proposalId=${payload.proposalId}`;
-          }
+          const isInvitation = payload.paymentKind === 'invitation' || payload.type === 'invitation';
+          const redirectUrl = isInvitation
+            ? `/service-requests/${payload.invitationId}?payment=success`
+            : `/client/projects/${payload.jobId}?payment=success&proposalId=${payload.proposalId}`;
+
           return res.status(200).json({
             success: true,
             message: 'Payment charged and escrowed successfully',
-            redirectUrl: (payload.paymentKind === 'invitation' || payload.type === 'invitation')
-              ? `/service-requests/${payload.invitationId}?payment=success`
-              : `/client/projects/${payload.jobId}?payment=success&proposalId=${payload.proposalId}`
+            redirectUrl
           });
         } else {
           return res.status(webhookRes.statusCode || 500).json({
