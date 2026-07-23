@@ -1,6 +1,7 @@
 const bcrypt = require('bcryptjs')
 const { pool } = require('../config/db')
 const { generateToken } = require('../utils/token')
+const { sendPasswordResetEmail } = require('../utils/emailService')
 const { OAuth2Client } = require('google-auth-library')
 const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID)
 
@@ -393,10 +394,243 @@ const googleLogin = async (req, res, next) => {
   }
 }
 
+/**
+ * Helper to generate 6-digit verification code
+ */
+const generateVerificationCode = () => {
+  return Math.floor(100000 + Math.random() * 900000).toString()
+}
+
+/**
+ * @desc    Request password reset code
+ * @route   POST /api/auth/forgot-password
+ * @access  Public
+ */
+const forgotPassword = async (req, res, next) => {
+  const { email } = req.body
+
+  if (!email || !isValidEmail(email)) {
+    const err = new Error('A valid email address is required')
+    err.statusCode = 400
+    return next(err)
+  }
+
+  const normalizedEmail = email.toLowerCase().trim()
+
+  try {
+    // 1. Check if user exists
+    const checkUserQuery = 'SELECT id FROM users WHERE email = $1'
+    const userRes = await pool.query(checkUserQuery, [normalizedEmail])
+
+    if (userRes.rows.length === 0) {
+      const err = new Error('No account found with this email address')
+      err.statusCode = 404
+      return next(err)
+    }
+
+    // 2. Generate reset code & expiration
+    const code = generateVerificationCode()
+    const expiresAt = new Date(Date.now() + 15 * 60 * 1000)
+
+    const upsertQuery = `
+      INSERT INTO email_verification_codes (email, code, expires_at)
+      VALUES ($1, $2, $3)
+      ON CONFLICT (email)
+      DO UPDATE SET code = $2, expires_at = $3, is_used = false
+      RETURNING email, expires_at;
+    `
+    await pool.query(upsertQuery, [normalizedEmail, code, expiresAt])
+
+    // 3. Send reset email
+    await sendPasswordResetEmail(normalizedEmail, code)
+
+    return res.status(200).json({
+      success: true,
+      message: 'Password reset code sent to your email',
+      email: normalizedEmail
+    })
+  } catch (err) {
+    console.error('Forgot password error:', err)
+    return next(err)
+  }
+}
+
+/**
+ * @desc    Verify password reset code
+ * @route   POST /api/auth/verify-reset-code
+ * @access  Public
+ */
+const verifyPasswordResetCode = async (req, res, next) => {
+  const { email, code } = req.body
+
+  if (!email || !isValidEmail(email)) {
+    const err = new Error('A valid email address is required')
+    err.statusCode = 400
+    return next(err)
+  }
+
+  if (!code || code.length !== 6 || isNaN(code)) {
+    const err = new Error('Code must be a 6-digit number')
+    err.statusCode = 400
+    return next(err)
+  }
+
+  const normalizedEmail = email.toLowerCase().trim()
+
+  try {
+    const findCodeQuery = `
+      SELECT id, code, expires_at, is_used
+      FROM email_verification_codes
+      WHERE email = $1
+      ORDER BY created_at DESC
+      LIMIT 1;
+    `
+    const codeRes = await pool.query(findCodeQuery, [normalizedEmail])
+
+    if (codeRes.rows.length === 0) {
+      const err = new Error('No verification code found for this email')
+      err.statusCode = 404
+      return next(err)
+    }
+
+    const verificationRecord = codeRes.rows[0]
+
+    if (verificationRecord.is_used) {
+      const err = new Error('This code has already been used')
+      err.statusCode = 400
+      return next(err)
+    }
+
+    if (new Date() > new Date(verificationRecord.expires_at)) {
+      const err = new Error('Verification code has expired')
+      err.statusCode = 400
+      return next(err)
+    }
+
+    if (verificationRecord.code !== code) {
+      const err = new Error('Invalid verification code')
+      err.statusCode = 400
+      return next(err)
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: 'Password reset code verified successfully'
+    })
+  } catch (err) {
+    console.error('Verify reset code error:', err)
+    return next(err)
+  }
+}
+
+/**
+ * @desc    Reset password using verification code
+ * @route   POST /api/auth/reset-password
+ * @access  Public
+ */
+const resetPassword = async (req, res, next) => {
+  const { email, code, newPassword } = req.body
+
+  if (!email || !isValidEmail(email)) {
+    const err = new Error('A valid email address is required')
+    err.statusCode = 400
+    return next(err)
+  }
+
+  if (!code || code.length !== 6 || isNaN(code)) {
+    const err = new Error('Code must be a 6-digit number')
+    err.statusCode = 400
+    return next(err)
+  }
+
+  if (!newPassword || newPassword.length < 6) {
+    const err = new Error('Password must be at least 6 characters long')
+    err.statusCode = 400
+    return next(err)
+  }
+
+  const normalizedEmail = email.toLowerCase().trim()
+
+  try {
+    // 1. Verify code validity
+    const findCodeQuery = `
+      SELECT id, code, expires_at, is_used
+      FROM email_verification_codes
+      WHERE email = $1
+      ORDER BY created_at DESC
+      LIMIT 1;
+    `
+    const codeRes = await pool.query(findCodeQuery, [normalizedEmail])
+
+    if (codeRes.rows.length === 0) {
+      const err = new Error('No verification code found for this email')
+      err.statusCode = 404
+      return next(err)
+    }
+
+    const verificationRecord = codeRes.rows[0]
+
+    if (verificationRecord.is_used) {
+      const err = new Error('This code has already been used')
+      err.statusCode = 400
+      return next(err)
+    }
+
+    if (new Date() > new Date(verificationRecord.expires_at)) {
+      const err = new Error('Verification code has expired')
+      err.statusCode = 400
+      return next(err)
+    }
+
+    if (verificationRecord.code !== code) {
+      const err = new Error('Invalid verification code')
+      err.statusCode = 400
+      return next(err)
+    }
+
+    // 2. Hash new password and update user
+    const salt = await bcrypt.genSalt(10)
+    const hashedPassword = await bcrypt.hash(newPassword, salt)
+
+    const updateUserQuery = `
+      UPDATE users
+      SET password = $1
+      WHERE email = $2
+      RETURNING id, full_name, email;
+    `
+    const userRes = await pool.query(updateUserQuery, [hashedPassword, normalizedEmail])
+
+    if (userRes.rows.length === 0) {
+      const err = new Error('User not found')
+      err.statusCode = 404
+      return next(err)
+    }
+
+    // 3. Mark code as used
+    const updateCodeQuery = `
+      UPDATE email_verification_codes
+      SET is_used = true
+      WHERE id = $1;
+    `
+    await pool.query(updateCodeQuery, [verificationRecord.id])
+
+    return res.status(200).json({
+      success: true,
+      message: 'Password reset successfully'
+    })
+  } catch (err) {
+    console.error('Reset password error:', err)
+    return next(err)
+  }
+}
 
 module.exports = {
   register,
   login,
   getMe,
-  googleLogin
+  googleLogin,
+  forgotPassword,
+  verifyPasswordResetCode,
+  resetPassword
 }
+

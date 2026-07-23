@@ -362,7 +362,30 @@ async function initDatabase() {
     // Ensure messages table has is_removed column
     console.log('Ensuring messages table has "is_removed" column...');
     await client.query('ALTER TABLE messages ADD COLUMN IF NOT EXISTS is_removed BOOLEAN DEFAULT false;');
-    console.log('Rating & Review tables and attributes checked/added successfully.');
+    
+    // Ensure disputes table exists and has necessary enhancement columns
+    console.log('Ensuring disputes table exists and has lifecycle columns...');
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS disputes (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        creator_id UUID NOT NULL REFERENCES users(id),
+        target_id UUID NOT NULL REFERENCES users(id),
+        project_id UUID NOT NULL REFERENCES projects(id),
+        message_log TEXT,
+        type VARCHAR(255),
+        title VARCHAR(255) NOT NULL,
+        content TEXT,
+        is_resolved BOOLEAN DEFAULT false,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+    await client.query('ALTER TABLE disputes ADD COLUMN IF NOT EXISTS evidence_urls TEXT;');
+    await client.query('ALTER TABLE disputes ADD COLUMN IF NOT EXISTS resolution_type VARCHAR(50);');
+    await client.query('ALTER TABLE disputes ADD COLUMN IF NOT EXISTS admin_notes TEXT;');
+    await client.query('ALTER TABLE disputes ADD COLUMN IF NOT EXISTS resolved_at TIMESTAMP;');
+
+    console.log('Rating, Review & Dispute tables and attributes checked/added successfully.');
+
 
 
   } catch (err) {

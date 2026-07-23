@@ -472,25 +472,86 @@ const deactivateUser = async (req, res, next) => {
 };
 
 /**
- * @desc    Get all disputes / projects with dispute status
+ * @desc    Get all disputes with joined user, project, milestone financial details, and evidence
  * @route   GET /api/admin/disputes
  * @access  Private (Admin)
  */
 const getDisputes = async (req, res, next) => {
   try {
     const query = `
-      SELECT p.*, 
-        c.full_name as client_name, c.email as client_email,
-        e.full_name as expert_name, e.email as expert_email
-      FROM projects p
-      LEFT JOIN users c ON p.client_id = c.id
-      LEFT JOIN users e ON p.expert_id = e.id
-      ORDER BY p.id DESC;
+      SELECT 
+        d.id,
+        d.id as dispute_id,
+        d.project_id,
+        d.creator_id,
+        d.target_id,
+        d.title,
+        d.type,
+        d.content,
+        d.evidence_urls,
+        d.message_log,
+        d.is_resolved,
+        d.resolution_type,
+        d.admin_notes,
+        d.created_at,
+        d.resolved_at,
+        p.title as project_title,
+        p.total_amount as project_total_amount,
+        p.status as project_status,
+        uc.full_name as creator_name,
+        uc.email as creator_email,
+        uc.role as creator_role,
+        ut.full_name as target_name,
+        ut.email as target_email,
+        ut.role as target_role,
+        cli.full_name as client_name,
+        cli.id as client_id,
+        exp.full_name as expert_name,
+        exp.id as expert_id
+      FROM disputes d
+      JOIN projects p ON d.project_id = p.id
+      LEFT JOIN users uc ON d.creator_id = uc.id
+      LEFT JOIN users ut ON d.target_id = ut.id
+      LEFT JOIN users cli ON p.client_id = cli.id
+      LEFT JOIN users exp ON p.expert_id = exp.id
+      ORDER BY d.created_at DESC;
     `;
     const result = await pool.query(query);
+
+    // Attach milestone financial details to each dispute
+    const disputes = await Promise.all(
+      result.rows.map(async (dispute) => {
+        const milestonesRes = await pool.query(
+          'SELECT amount, status, released_amount FROM milestones WHERE project_id = $1',
+          [dispute.project_id]
+        );
+
+        let totalReleased = 0;
+        milestonesRes.rows.forEach((m) => {
+          const status = String(m.status).toLowerCase();
+          if (status === 'released' || status === 'finished' || status === 'approved') {
+            totalReleased += parseFloat(m.released_amount || m.amount || 0);
+          }
+        });
+
+        const totalAmount = parseFloat(dispute.project_total_amount || 0);
+        const remainingEscrow = Math.max(0, totalAmount - totalReleased);
+
+        return {
+          ...dispute,
+          value: `$${totalAmount.toLocaleString('en-US', { minimumFractionDigits: 2 })}`,
+          released_amount: totalReleased,
+          remaining_escrow: remainingEscrow,
+          status: dispute.is_resolved
+            ? (dispute.resolution_type === 'refund_client' ? 'Resolved (Refunded)' : 'Resolved (Released)')
+            : 'Under Review'
+        };
+      })
+    );
+
     return res.status(200).json({
       success: true,
-      disputes: result.rows
+      disputes
     });
   } catch (err) {
     return next(err);
@@ -498,13 +559,13 @@ const getDisputes = async (req, res, next) => {
 };
 
 /**
- * @desc    Resolve a dispute (refund client or release funds to expert)
+ * @desc    Resolve a dispute (refund client or release remaining escrow to expert)
  * @route   POST /api/admin/disputes/:id/resolve
  * @access  Private (Admin)
  */
 const resolveDispute = async (req, res, next) => {
-  const { id } = req.params;
-  const { resolution } = req.body; // 'refund_client' or 'release_expert'
+  const { id } = req.params; // Can be dispute_id or project_id
+  const { resolution, admin_notes, apply_ban_user_id } = req.body; // 'refund_client' or 'release_expert'
 
   if (!['refund_client', 'release_expert'].includes(resolution)) {
     const err = new Error("Invalid resolution. Must be 'refund_client' or 'release_expert'");
@@ -516,45 +577,123 @@ const resolveDispute = async (req, res, next) => {
   try {
     await dbClient.query('BEGIN');
 
-    const projectRes = await dbClient.query('SELECT * FROM projects WHERE id = $1', [id]);
+    // 1. Find dispute record (by dispute id or project id)
+    let disputeRes = await dbClient.query('SELECT * FROM disputes WHERE id = $1', [id]);
+    if (disputeRes.rows.length === 0) {
+      disputeRes = await dbClient.query('SELECT * FROM disputes WHERE project_id = $1 ORDER BY created_at DESC LIMIT 1', [id]);
+    }
+
+    let dispute = disputeRes.rows[0];
+    const projectId = dispute ? dispute.project_id : id;
+
+    // 2. Find project
+    const projectRes = await dbClient.query('SELECT * FROM projects WHERE id = $1', [projectId]);
     if (projectRes.rows.length === 0) {
-      const err = new Error('Project not found');
+      const err = new Error('Project associated with dispute not found');
       err.statusCode = 404;
       await dbClient.query('ROLLBACK');
       return next(err);
     }
 
     const project = projectRes.rows[0];
-    const newStatus = resolution === 'refund_client' ? 'terminated' : 'completed';
 
-    await dbClient.query('UPDATE projects SET status = $1 WHERE id = $2', [newStatus, id]);
+    // 3. Calculate remaining escrow balance (total project amount minus already released milestone funds)
+    const milestonesRes = await dbClient.query(
+      'SELECT amount, status, released_amount FROM milestones WHERE project_id = $1',
+      [projectId]
+    );
 
-    const refundAmount = parseFloat(project.total_amount || 0);
+    let totalReleased = 0;
+    milestonesRes.rows.forEach((m) => {
+      const status = String(m.status).toLowerCase();
+      if (status === 'released' || status === 'finished' || status === 'approved') {
+        totalReleased += parseFloat(m.released_amount || m.amount || 0);
+      }
+    });
 
+    const totalProjectAmount = parseFloat(project.total_amount || 0);
+    const remainingEscrow = Math.max(0, totalProjectAmount - totalReleased);
+
+    const newProjectStatus = resolution === 'refund_client' ? 'terminated' : 'completed';
+
+    // 4. Update project status
+    await dbClient.query(
+      "UPDATE projects SET status = $1, end_date = CURRENT_TIMESTAMP WHERE id = $2",
+      [newProjectStatus, projectId]
+    );
+
+    // 5. Handle financial transfers for remaining escrow balance
     if (resolution === 'refund_client') {
-      await dbClient.query(
-        `UPDATE client_profiles SET budget = budget + $1 WHERE id = $2;`,
-        [refundAmount, project.client_id]
-      );
-      await dbClient.query(
-        `INSERT INTO transactions (sender_id, receiver_id, amount, type, status, complete_at)
-         VALUES ($1, $1, $2, 'refund', 'completed', CURRENT_TIMESTAMP);`,
-        [project.client_id, refundAmount]
-      );
+      if (remainingEscrow > 0) {
+        await dbClient.query(
+          `UPDATE client_profiles SET budget = budget + $1 WHERE id = $2;`,
+          [remainingEscrow, project.client_id]
+        );
+        await dbClient.query(
+          `INSERT INTO transactions (project_id, sender_id, receiver_id, amount, type, status, complete_at)
+           VALUES ($1, $2, $2, $3, 'refund', 'completed', CURRENT_TIMESTAMP);`,
+          [projectId, project.client_id, remainingEscrow]
+        );
+      }
     } else {
+      if (remainingEscrow > 0) {
+        await dbClient.query(
+          `INSERT INTO transactions (project_id, sender_id, receiver_id, amount, type, status, complete_at)
+           VALUES ($1, $2, $3, $4, 'escrow_release', 'completed', CURRENT_TIMESTAMP);`,
+          [projectId, project.client_id, project.expert_id, remainingEscrow]
+        );
+      }
+    }
+
+    // 6. Update dispute record if exists
+    if (dispute) {
       await dbClient.query(
-        `INSERT INTO transactions (sender_id, receiver_id, amount, type, status, complete_at)
-         VALUES ($1, $2, $3, 'escrow_release', 'completed', CURRENT_TIMESTAMP);`,
-        [project.client_id, project.expert_id, refundAmount]
+        `UPDATE disputes 
+         SET is_resolved = true, resolution_type = $1, admin_notes = $2, resolved_at = CURRENT_TIMESTAMP 
+         WHERE id = $3;`,
+        [resolution, admin_notes || null, dispute.id]
+      );
+    }
+
+    // 7. Apply optional user penalty / ban if requested by admin
+    if (apply_ban_user_id) {
+      await dbClient.query(
+        `UPDATE users SET acc_status = false WHERE id = $1;`,
+        [apply_ban_user_id]
       );
     }
 
     await dbClient.query('COMMIT');
 
+    // 8. Trigger Notifications
+    try {
+      const { sendNotification } = require('../utils/notificationService');
+      const outcomeText = resolution === 'refund_client'
+        ? `Dispute resolved in favor of the client. Unreleased escrow ($${remainingEscrow.toFixed(2)}) has been refunded.`
+        : `Dispute resolved in favor of the expert. Escrow payment ($${remainingEscrow.toFixed(2)}) has been released.`;
+
+      await sendNotification(project.client_id, {
+        title: "Dispute Resolved",
+        message: `Project "${project.title}": ${outcomeText}`,
+        type: "project_finished",
+        referenceId: projectId
+      });
+
+      await sendNotification(project.expert_id, {
+        title: "Dispute Resolved",
+        message: `Project "${project.title}": ${outcomeText}`,
+        type: "project_finished",
+        referenceId: projectId
+      });
+    } catch (notifErr) {
+      console.error('[Notification Trigger Error] resolveDispute:', notifErr.message);
+    }
+
     return res.status(200).json({
       success: true,
       message: `Dispute resolved successfully (${resolution})`,
-      projectStatus: newStatus
+      projectStatus: newProjectStatus,
+      refundedOrReleasedAmount: remainingEscrow
     });
   } catch (err) {
     await dbClient.query('ROLLBACK');
