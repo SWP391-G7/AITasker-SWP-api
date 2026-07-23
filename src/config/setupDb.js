@@ -152,8 +152,8 @@ async function initDatabase() {
     console.log('Onboarding columns checked/added successfully.');
     
     // Ensure job_status enum has all required values
-    console.log('Ensuring job_status enum has required values (pending, closed, removed)...');
-    const requiredJobStatuses = ['pending', 'closed', 'removed'];
+    console.log('Ensuring job_status enum has required values (pending, closed, removed, rejected)...');
+    const requiredJobStatuses = ['pending', 'closed', 'removed', 'rejected'];
     for (const val of requiredJobStatuses) {
       try {
         await client.query(`ALTER TYPE job_status ADD VALUE IF NOT EXISTS '${val}';`);
