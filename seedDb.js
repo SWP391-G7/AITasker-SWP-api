@@ -340,6 +340,39 @@ async function seedDatabase() {
       { expert: 'emma.thompson@example.com', client: 'client.city@example.com', amount: 3900, status: 'active', monthOffset: 0, startDay: 9 }
     ];
 
+    // The fixed dataset above covers the latest five months. Add one completed
+    // project for every earlier elapsed month so January through the current
+    // month have revenue, while future months intentionally remain empty.
+    const currentMonthIndex = new Date().getMonth();
+    const historicalExperts = [
+      'expert1@example.com',
+      'expert2@example.com',
+      'expert3@example.com',
+      'expert4@example.com',
+      'alex.nguyen@example.com',
+      'maya.patel@example.com'
+    ];
+    const historicalClients = [
+      'client1@example.com',
+      'client2@example.com',
+      'client3@example.com',
+      'client.nova@example.com',
+      'client.green@example.com',
+      'client.finpeak@example.com'
+    ];
+
+    for (let monthOffset = currentMonthIndex; monthOffset >= 5; monthOffset -= 1) {
+      const sequenceIndex = currentMonthIndex - monthOffset;
+      analyticsProjectsData.push({
+        expert: historicalExperts[sequenceIndex % historicalExperts.length],
+        client: historicalClients[sequenceIndex % historicalClients.length],
+        amount: 2800 + sequenceIndex * 450,
+        status: 'completed',
+        monthOffset,
+        startDay: 3 + (sequenceIndex % 5)
+      });
+    }
+
     const seededAnalyticsProjectIds = [];
     for (const project of analyticsProjectsData) {
       const expertId = expertIds[project.expert] || additionalUserIds[project.expert];
@@ -359,7 +392,7 @@ async function seedDatabase() {
             WHEN LOWER($3::text) = 'completed' THEN
               date_trunc('month', CURRENT_DATE)
                 - ($6::integer * INTERVAL '1 month')
-                + (($7::integer + 18) * INTERVAL '1 day')
+                + (($7::integer + 12) * INTERVAL '1 day')
             ELSE NULL
           END,
           $8,
@@ -382,7 +415,8 @@ async function seedDatabase() {
       seededAnalyticsProjectIds.push(analyticsProjectId);
 
       if (project.status === 'completed') {
-        // Only completed escrow releases count toward the analytics revenue KPI.
+        // Keep each release inside its intended seed month so every revenue chart
+        // column has a predictable non-zero value without spilling into the next month.
         await client.query(`
           INSERT INTO transactions (
             project_id, sender_id, receiver_id, amount,
@@ -393,7 +427,7 @@ async function seedDatabase() {
             'escrow_release', 'completed', 'card',
             date_trunc('month', CURRENT_DATE)
               - ($5::integer * INTERVAL '1 month')
-              + (($6::integer + 18) * INTERVAL '1 day')
+              + (($6::integer + 12) * INTERVAL '1 day')
           );
         `, [
           analyticsProjectId,

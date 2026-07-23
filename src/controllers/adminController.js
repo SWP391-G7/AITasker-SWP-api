@@ -73,8 +73,8 @@ const getAnalytics = async (req, res, next) => {
       pool.query(`
         WITH months AS (
           SELECT generate_series(
-            date_trunc('month', $1::date) - interval '4 months',
-            date_trunc('month', $1::date),
+            date_trunc('year', $1::date),
+            date_trunc('year', $1::date) + interval '11 months',
             interval '1 month'
           ) AS month_start
         )
