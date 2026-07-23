@@ -1,3 +1,10 @@
+/**
+ * Backend module: middleware/authMiddleware.js
+ *
+ * Vai trò: Middleware auth Middleware: xử lý yêu cầu dùng chung trước hoặc sau controller.
+ * Luồng chính: Đọc request, bổ sung context hoặc chuẩn hóa lỗi rồi gọi next để chuyển sang bước kế tiếp.
+ * Lưu ý bảo trì: Middleware phải kết thúc response hoặc gọi next đúng một lần để tránh request bị treo.
+ */
 const { verifyToken } = require('../utils/token');
 const { pool } = require('../config/db');
 

@@ -1,4 +1,11 @@
 /**
+ * Backend module: middleware/errorMiddleware.js
+ *
+ * Vai trò: Middleware error Middleware: xử lý yêu cầu dùng chung trước hoặc sau controller.
+ * Luồng chính: Đọc request, bổ sung context hoặc chuẩn hóa lỗi rồi gọi next để chuyển sang bước kế tiếp.
+ * Lưu ý bảo trì: Middleware phải kết thúc response hoặc gọi next đúng một lần để tránh request bị treo.
+ */
+/**
  * Express custom error handling middleware
  */
 const errorHandler = (err, req, res, next) => {

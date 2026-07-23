@@ -1,3 +1,10 @@
+/**
+ * Backend module: controllers/adminController.js
+ *
+ * Vai trò: Controller admin Controller: tiếp nhận request đã đi qua route/middleware, kiểm tra dữ liệu đầu vào và điều phối nghiệp vụ.
+ * Luồng chính: Đọc req/user/params/body, làm việc với PostgreSQL hoặc dịch vụ ngoài, sau đó trả JSON chuẩn hoặc chuyển lỗi cho error middleware.
+ * Lưu ý bảo trì: Khi sửa controller cần giữ status code, quyền truy cập, transaction và cấu trúc response đồng nhất với frontend.
+ */
 const bcrypt = require('bcryptjs');
 const { pool } = require('../config/db');
 
@@ -7,6 +14,7 @@ const isValidEmail = (email) => {
   return emailRegex.test(email);
 };
 
+// Thực hiện phần logic “to date only” trong phạm vi trách nhiệm của module hiện tại.
 const toDateOnly = (date) => {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, '0');

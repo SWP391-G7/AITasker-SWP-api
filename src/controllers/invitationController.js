@@ -1,3 +1,10 @@
+/**
+ * Backend module: controllers/invitationController.js
+ *
+ * Vai trò: Controller invitation Controller: tiếp nhận request đã đi qua route/middleware, kiểm tra dữ liệu đầu vào và điều phối nghiệp vụ.
+ * Luồng chính: Đọc req/user/params/body, làm việc với PostgreSQL hoặc dịch vụ ngoài, sau đó trả JSON chuẩn hoặc chuyển lỗi cho error middleware.
+ * Lưu ý bảo trì: Khi sửa controller cần giữ status code, quyền truy cập, transaction và cấu trúc response đồng nhất với frontend.
+ */
 const { pool } = require('../config/db')
 const { sendNotification } = require('../utils/notificationService')
 

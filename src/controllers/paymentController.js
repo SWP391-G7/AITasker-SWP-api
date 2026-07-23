@@ -1,3 +1,10 @@
+/**
+ * Backend module: controllers/paymentController.js
+ *
+ * Vai trò: Controller payment Controller: tiếp nhận request đã đi qua route/middleware, kiểm tra dữ liệu đầu vào và điều phối nghiệp vụ.
+ * Luồng chính: Đọc req/user/params/body, làm việc với PostgreSQL hoặc dịch vụ ngoài, sau đó trả JSON chuẩn hoặc chuyển lỗi cho error middleware.
+ * Lưu ý bảo trì: Khi sửa controller cần giữ status code, quyền truy cập, transaction và cấu trúc response đồng nhất với frontend.
+ */
 const { pool } = require('../config/db');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
@@ -126,6 +133,7 @@ const initiateProposalPayment = async (req, res, next) => {
   }
 };
 
+// Thực hiện phần logic “initiate invitation payment” trong phạm vi trách nhiệm của module hiện tại.
 const initiateInvitationPayment = async (req, res, next) => {
   const userId = req.user.id;
   const userRole = req.user.role;

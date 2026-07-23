@@ -1,3 +1,10 @@
+/**
+ * Backend module: utils/token.js
+ *
+ * Vai trò: Utility token: đóng gói logic dùng lại ở nhiều controller.
+ * Luồng chính: Nhận tham số rõ ràng, thực hiện một nhiệm vụ hẹp và trả kết quả hoặc ném lỗi cho caller xử lý.
+ * Lưu ý bảo trì: Giữ utility độc lập với HTTP response nếu không thật sự cần thiết để dễ kiểm thử.
+ */
 const jwt = require('jsonwebtoken');
 require('dotenv').config();
 

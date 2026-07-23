@@ -1,8 +1,16 @@
+/**
+ * Backend module: utils/emailService.js
+ *
+ * Vai trò: Utility email Service: đóng gói logic dùng lại ở nhiều controller.
+ * Luồng chính: Nhận tham số rõ ràng, thực hiện một nhiệm vụ hẹp và trả kết quả hoặc ném lỗi cho caller xử lý.
+ * Lưu ý bảo trì: Giữ utility độc lập với HTTP response nếu không thật sự cần thiết để dễ kiểm thử.
+ */
 const nodemailer = require('nodemailer');
 require('dotenv').config();
 
 let transporter;
 
+// Thực hiện phần logic “initialize email service” trong phạm vi trách nhiệm của module hiện tại.
 const initializeEmailService = async () => {
   if (process.env.NODE_ENV === 'production') {
     transporter = nodemailer.createTransport({
@@ -28,6 +36,7 @@ const initializeEmailService = async () => {
   }
 };
 
+// Tạo hoặc gửi dữ liệu cho nghiệp vụ “send verification code”, đồng thời chuyển lỗi về caller/UI theo cơ chế của module.
 const sendVerificationCode = async (email, code) => {
   try {
     if (!transporter) {
@@ -67,6 +76,7 @@ const sendVerificationCode = async (email, code) => {
   }
 };
 
+// Tạo hoặc gửi dữ liệu cho nghiệp vụ “send password reset email”, đồng thời chuyển lỗi về caller/UI theo cơ chế của module.
 const sendPasswordResetEmail = async (email, code) => {
   try {
     if (!transporter) {

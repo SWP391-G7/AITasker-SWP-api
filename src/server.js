@@ -1,3 +1,10 @@
+/**
+ * Backend module: server.js
+ *
+ * Vai trò: server: điểm ghép nối và khởi động các thành phần chính của backend.
+ * Luồng chính: Nạp cấu hình, middleware, route hoặc server lifecycle theo thứ tự cần thiết.
+ * Lưu ý bảo trì: Thứ tự khởi tạo có thể ảnh hưởng CORS, error handling, WebSocket và khả năng nhận request.
+ */
 const app = require('./app')
 const { testConnection } = require('./config/db')
 const { initDatabase } = require('./config/setupDb')
