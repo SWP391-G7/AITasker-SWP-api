@@ -5,46 +5,66 @@
  * Luồng chính: Nhận tham số rõ ràng, thực hiện một nhiệm vụ hẹp và trả kết quả hoặc ném lỗi cho caller xử lý.
  * Lưu ý bảo trì: Giữ utility độc lập với HTTP response nếu không thật sự cần thiết để dễ kiểm thử.
  */
-const nodemailer = require('nodemailer');
-require('dotenv').config();
+const nodemailer = require('nodemailer')
+require('dotenv').config()
 
-let transporter;
+let transporter
 
 // Thực hiện phần logic “initialize email service” trong phạm vi trách nhiệm của module hiện tại.
 const initializeEmailService = async () => {
-  if (process.env.NODE_ENV === 'production') {
+  const hasSmtpConfig = Boolean(process.env.SMTP_HOST || process.env.SMTP_USER)
+
+  if (hasSmtpConfig || process.env.NODE_ENV === 'production') {
+    const host = process.env.SMTP_HOST || 'smtp.gmail.com'
+    const port = parseInt(process.env.SMTP_PORT, 10) || 587
+    const secure = process.env.SMTP_SECURE === 'true'
+
     transporter = nodemailer.createTransport({
-      host: process.env.SMTP_HOST,
-      port: process.env.SMTP_PORT,
-      secure: process.env.SMTP_SECURE === 'true',
+      host,
+      port,
+      secure,
       auth: {
         user: process.env.SMTP_USER,
         pass: process.env.SMTP_PASS
       }
-    });
-  } else {
-    const testAccount = await nodemailer.createTestAccount();
-    transporter = nodemailer.createTransport({
-      host: testAccount.smtp.host,
-      port: testAccount.smtp.port,
-      secure: testAccount.smtp.secure,
-      auth: {
-        user: testAccount.user,
-        pass: testAccount.pass
-      }
-    });
-  }
-};
+    })
 
+    console.log(`[EmailService] Initialized real SMTP transporter (${host}:${port}) for user: ${process.env.SMTP_USER || 'none'}`)
+  } else {
+    console.log('[EmailService] SMTP credentials not set in environment. Generating Ethereal test account...')
+    try {
+      const testAccount = await nodemailer.createTestAccount()
+      transporter = nodemailer.createTransport({
+        host: testAccount.smtp.host,
+        port: testAccount.smtp.port,
+        secure: testAccount.smtp.secure,
+        auth: {
+          user: testAccount.user,
+          pass: testAccount.pass
+        }
+      })
+      console.log(`[EmailService] Ethereal test account created: ${testAccount.user}`)
+    } catch (err) {
+      console.error('[EmailService] Failed to create Ethereal test account:', err.message)
+    }
+  }
+}
+
+const getSenderAddress = () => {
+  if (process.env.EMAIL_FROM) return process.env.EMAIL_FROM
+  if (process.env.SMTP_USER) return `"AITasker" <${process.env.SMTP_USER}>`
+  return 'noreply@aitasker.com'
+}
 // Tạo hoặc gửi dữ liệu cho nghiệp vụ “send verification code”, đồng thời chuyển lỗi về caller/UI theo cơ chế của module.
+
 const sendVerificationCode = async (email, code) => {
   try {
     if (!transporter) {
-      await initializeEmailService();
+      await initializeEmailService()
     }
 
     const mailOptions = {
-      from: process.env.EMAIL_FROM || 'noreply@aitasker.com',
+      from: getSenderAddress(),
       to: email,
       subject: 'Email Verification Code - AITasker',
       html: `
@@ -61,30 +81,33 @@ const sendVerificationCode = async (email, code) => {
           <p style="color: #999; font-size: 12px; text-align: center;">© 2026 AITasker. All rights reserved.</p>
         </div>
       `
-    };
-
-    const info = await transporter.sendMail(mailOptions);
-    
-    if (process.env.NODE_ENV !== 'production') {
-      console.log('Preview URL: %s', nodemailer.getTestMessageUrl(info));
     }
 
-    return info;
+    const info = await transporter.sendMail(mailOptions)
+
+    const previewUrl = nodemailer.getTestMessageUrl(info)
+    if (previewUrl) {
+      console.log('[EmailService] Ethereal Preview URL: %s', previewUrl)
+    } else {
+      console.log('[EmailService] Verification email sent successfully to:', email)
+    }
+
+    return info
   } catch (err) {
-    console.error('Error sending verification email:', err);
-    throw err;
+    console.error('Error sending verification email:', err)
+    throw err
   }
-};
+}
 
 // Tạo hoặc gửi dữ liệu cho nghiệp vụ “send password reset email”, đồng thời chuyển lỗi về caller/UI theo cơ chế của module.
 const sendPasswordResetEmail = async (email, code) => {
   try {
     if (!transporter) {
-      await initializeEmailService();
+      await initializeEmailService()
     }
 
     const mailOptions = {
-      from: process.env.EMAIL_FROM || 'noreply@aitasker.com',
+      from: getSenderAddress(),
       to: email,
       subject: 'Password Reset Code - AITasker',
       html: `
@@ -101,24 +124,28 @@ const sendPasswordResetEmail = async (email, code) => {
           <p style="color: #999; font-size: 12px; text-align: center;">© 2026 AITasker. All rights reserved.</p>
         </div>
       `
-    };
-
-    const info = await transporter.sendMail(mailOptions);
-
-    if (process.env.NODE_ENV !== 'production') {
-      console.log('Preview URL: %s', nodemailer.getTestMessageUrl(info));
     }
 
-    return info;
+    const info = await transporter.sendMail(mailOptions)
+
+    const previewUrl = nodemailer.getTestMessageUrl(info)
+    if (previewUrl) {
+      console.log('[EmailService] Ethereal Preview URL: %s', previewUrl)
+    } else {
+      console.log('[EmailService] Password reset email sent successfully to:', email)
+    }
+
+    return info
   } catch (err) {
-    console.error('Error sending password reset email:', err);
-    throw err;
+    console.error('Error sending password reset email:', err)
+    throw err
   }
-};
+}
 
 module.exports = {
   initializeEmailService,
   sendVerificationCode,
   sendPasswordResetEmail
 };
+
 
