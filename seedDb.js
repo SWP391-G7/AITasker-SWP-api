@@ -88,6 +88,41 @@ async function seedDatabase() {
       console.log(`- Created Client: ${cli.email} (ID: ${res.rows[0].id})`);
     }
 
+    // 20 additional users for admin user-management, search, and profile demos
+    const additionalUsersData = [
+      { role: 'expert', email: 'alex.nguyen@example.com', name: 'Alex Nguyen', verified: true, active: true, title: 'NLP Solutions Engineer', skills: 'Python, Transformers, spaCy, RAG', specialization: 'Natural Language Processing', rate: '$95/hr' },
+      { role: 'expert', email: 'maya.patel@example.com', name: 'Maya Patel', verified: true, active: true, title: 'AI Product Consultant', skills: 'Product Strategy, LLM, Prompt Engineering', specialization: 'AI Product Strategy', rate: '$110/hr' },
+      { role: 'expert', email: 'liam.wilson@example.com', name: 'Liam Wilson', verified: true, active: true, title: 'Data Science Lead', skills: 'Python, Pandas, Scikit-learn, SQL', specialization: 'Data Science', rate: '$125/hr' },
+      { role: 'expert', email: 'sofia.martinez@example.com', name: 'Sofia Martinez', verified: true, active: true, title: 'Computer Vision Engineer', skills: 'OpenCV, YOLO, PyTorch, CUDA', specialization: 'Computer Vision', rate: '$135/hr' },
+      { role: 'expert', email: 'ethan.brown@example.com', name: 'Ethan Brown', verified: false, active: true, title: 'Junior AI Automation Developer', skills: 'JavaScript, Python, LangChain, APIs', specialization: 'Workflow Automation', rate: '$65/hr' },
+      { role: 'expert', email: 'hana.kim@example.com', name: 'Hana Kim', verified: true, active: true, title: 'Conversational AI Specialist', skills: 'Dialogflow, OpenAI API, NLP, Node.js', specialization: 'Conversational AI', rate: '$105/hr' },
+      { role: 'expert', email: 'noah.anderson@example.com', name: 'Noah Anderson', verified: true, active: true, title: 'Cloud ML Engineer', skills: 'AWS, Docker, Kubernetes, MLflow', specialization: 'MLOps', rate: '$145/hr' },
+      { role: 'expert', email: 'isabella.rossi@example.com', name: 'Isabella Rossi', verified: true, active: false, title: 'Generative AI Designer', skills: 'Stable Diffusion, ComfyUI, Python, UX', specialization: 'Generative AI', rate: '$100/hr' },
+      { role: 'expert', email: 'lucas.silva@example.com', name: 'Lucas Silva', verified: true, active: true, title: 'AI Security Researcher', skills: 'Python, AI Safety, Red Teaming, Cybersecurity', specialization: 'AI Security', rate: '$160/hr' },
+      { role: 'expert', email: 'emma.thompson@example.com', name: 'Emma Thompson', verified: true, active: true, title: 'Recommendation Systems Expert', skills: 'Python, TensorFlow, Recommenders, BigQuery', specialization: 'Recommendation Systems', rate: '$130/hr' },
+      { role: 'client', email: 'client.nova@example.com', name: 'Olivia Davis (Nova Retail)', verified: true, active: true, company: 'Nova Retail Labs', industry: 'Retail', budget: 18000 },
+      { role: 'client', email: 'client.green@example.com', name: 'James Miller (GreenGrid)', verified: true, active: true, company: 'GreenGrid Energy', industry: 'Energy', budget: 30000 },
+      { role: 'client', email: 'client.finpeak@example.com', name: 'Charlotte Moore (FinPeak)', verified: true, active: true, company: 'FinPeak Analytics', industry: 'Finance', budget: 45000 },
+      { role: 'client', email: 'client.travel@example.com', name: 'Benjamin Taylor (TravelWise)', verified: false, active: true, company: 'TravelWise', industry: 'Travel', budget: 12000 },
+      { role: 'client', email: 'client.agri@example.com', name: 'Amelia Thomas (AgriSense)', verified: true, active: true, company: 'AgriSense Technologies', industry: 'Agriculture', budget: 22000 },
+      { role: 'client', email: 'client.logix@example.com', name: 'Henry Jackson (LogixFlow)', verified: true, active: true, company: 'LogixFlow', industry: 'Logistics', budget: 28000 },
+      { role: 'client', email: 'client.media@example.com', name: 'Mia White (BrightMedia)', verified: true, active: false, company: 'BrightMedia Studio', industry: 'Media', budget: 15000 },
+      { role: 'client', email: 'client.law@example.com', name: 'Daniel Harris (LexNova)', verified: true, active: true, company: 'LexNova Legal', industry: 'Legal Services', budget: 35000 },
+      { role: 'client', email: 'client.sports@example.com', name: 'Harper Martin (SportIQ)', verified: true, active: true, company: 'SportIQ', industry: 'Sports Technology', budget: 20000 },
+      { role: 'client', email: 'client.city@example.com', name: 'Alexander Clark (SmartCity)', verified: true, active: true, company: 'SmartCity Innovations', industry: 'Public Technology', budget: 50000 }
+    ];
+
+    const additionalUserIds = {};
+    for (const [index, user] of additionalUsersData.entries()) {
+      const res = await client.query(`
+        INSERT INTO users (password, full_name, email, role, is_verified, acc_status, created_at)
+        VALUES ($1, $2, $3, $4, $5, $6, CURRENT_DATE - ($7::integer * INTERVAL '1 day'))
+        RETURNING id;
+      `, [hashedPassword, user.name, user.email, user.role, user.verified, user.active, index + 1]);
+      additionalUserIds[user.email] = res.rows[0].id;
+      console.log(`- Created Additional ${user.role}: ${user.email} (ID: ${res.rows[0].id})`);
+    }
+
     // ----------------------------------------------------
     // STEP 2: Insert Expert Profiles
     // ----------------------------------------------------
@@ -101,6 +136,26 @@ async function seedDatabase() {
         ($3, 'Computer Vision Researcher', 'OpenCV, PyTorch, YOLO, Computer Vision', '5 years', 'https://elena.vision', '$150/hr', 'Expert in custom object detection, image segmentation pipelines, and model deployment on edge devices.', 'Computer Vision, Image Processing', 4.8),
         ($4, 'Generative AI Developer', 'LangChain, OpenAI API, Automation, Data', '3 years', 'https://davidk.ai', '$120/hr', 'Specialized in building LLM agents, multi-agent frameworks, chat bots, and custom workflow automation.', 'Generative AI, Web Automation', 4.7);
     `, [expertIds['expert1@example.com'], expertIds['expert2@example.com'], expertIds['expert3@example.com'], expertIds['expert4@example.com']]);
+
+    for (const [expertIndex, expert] of additionalUsersData.filter((user) => user.role === 'expert').entries()) {
+      await client.query(`
+        INSERT INTO expert_profiles (
+          id, professional_title, skills, experience, portfolio_url,
+          hourly_rate, bio, ai_specializations, avg_rating
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9);
+      `, [
+        additionalUserIds[expert.email],
+        expert.title,
+        expert.skills,
+        '3-5 years',
+        `https://portfolio.example.com/${expert.email.split('@')[0]}`,
+        expert.rate,
+        `${expert.name} helps teams design and deliver reliable AI solutions for real-world business needs.`,
+        expert.specialization,
+        Number((4.3 + (expertIndex % 6) * 0.1).toFixed(1))
+      ]);
+    }
     console.log('Expert profiles created.');
 
     // ----------------------------------------------------
@@ -115,6 +170,19 @@ async function seedDatabase() {
         ($2, 'HealthAI Technologies', 'Healthcare', 'A digital health startup creating artificial intelligence diagnostics tools and patient triage systems.', 25000.00),
         ($3, 'EduLearn Platform', 'Education', 'An interactive platform offering personalized learning solutions for K-12 and university mathematics.', 5000.00);
     `, [clientIds['client1@example.com'], clientIds['client2@example.com'], clientIds['client3@example.com']]);
+
+    for (const clientUser of additionalUsersData.filter((user) => user.role === 'client')) {
+      await client.query(`
+        INSERT INTO client_profiles (id, company_name, industry, bio, budget)
+        VALUES ($1, $2, $3, $4, $5);
+      `, [
+        additionalUserIds[clientUser.email],
+        clientUser.company,
+        clientUser.industry,
+        `${clientUser.company} is looking for practical AI solutions to improve operations and customer experience.`,
+        clientUser.budget
+      ]);
+    }
     console.log('Client profiles created.');
 
     // ----------------------------------------------------
