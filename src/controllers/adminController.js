@@ -255,7 +255,6 @@ const createUser = async (req, res, next) => {
     if (checkUserRes.rows.length > 0) {
       const err = new Error('Email is already registered');
       err.statusCode = 400;
-      dbClient.release();
       return next(err);
     }
 
@@ -338,7 +337,6 @@ const updateUser = async (req, res, next) => {
     if (checkEmailRes.rows.length > 0) {
       const err = new Error('Email is already in use by another user');
       err.statusCode = 400;
-      dbClient.release();
       return next(err);
     }
 
@@ -350,7 +348,6 @@ const updateUser = async (req, res, next) => {
       const err = new Error('User not found');
       err.statusCode = 404;
       await dbClient.query('ROLLBACK');
-      dbClient.release();
       return next(err);
     }
     const oldRole = oldRoleRes.rows[0].role;

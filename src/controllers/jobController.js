@@ -238,7 +238,8 @@ const updateJobPost = async (req, res, next) => {
       return next(err)
     }
 
-    if (jobCheck.rows[0].client_id !== userId) {
+    const userRole = req.user.role
+    if (jobCheck.rows[0].client_id !== userId && userRole !== 'admin') {
       const err = new Error('Forbidden: You can only update your own job posts')
       err.statusCode = 403
       return next(err)
@@ -427,7 +428,8 @@ const deleteJobPost = async (req, res, next) => {
       return next(err)
     }
 
-    if (jobCheck.rows[0].client_id !== userId) {
+    const userRole = req.user.role
+    if (jobCheck.rows[0].client_id !== userId && userRole !== 'admin') {
       const err = new Error('Forbidden: You can only delete your own job posts')
       err.statusCode = 403
       return next(err)
