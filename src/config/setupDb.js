@@ -359,7 +359,11 @@ async function initDatabase() {
     await client.query(`
       ALTER TABLE services ADD COLUMN IF NOT EXISTS video_link VARCHAR(255);
     `);
+    // Ensure messages table has is_removed column
+    console.log('Ensuring messages table has "is_removed" column...');
+    await client.query('ALTER TABLE messages ADD COLUMN IF NOT EXISTS is_removed BOOLEAN DEFAULT false;');
     console.log('Rating & Review tables and attributes checked/added successfully.');
+
 
   } catch (err) {
     console.error('Error during database initialization:', err);

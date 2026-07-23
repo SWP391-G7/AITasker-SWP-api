@@ -162,8 +162,10 @@ CREATE TABLE messages (
     content TEXT,
     attachments VARCHAR(255),
     is_read BOOLEAN DEFAULT false,
+    is_removed BOOLEAN DEFAULT false,
     send_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
 
 -- 12. MILESTONE TABLE
 CREATE TABLE milestones (
