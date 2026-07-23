@@ -113,7 +113,8 @@ const getUserProfile = async (req, res, next) => {
         pricingType: s.pricing_type,
         deliveryDays: s.delivery_days,
         tags: s.tags,
-        avgRating: s.avg_rating
+        avgRating: s.avg_rating,
+        status: s.status
       })),
       projects: projects.map(p => ({
         id: p.id,
