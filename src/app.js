@@ -52,7 +52,12 @@ app.get('/api/health', (req, res) => {
     service: 'AITasker API Backend'
   })
 })
-app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerDocument)) // SwaggerUI for API documents
+app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerDocument, {
+  customSiteTitle: "AITasker API Documentation",
+  swaggerOptions: {
+    persistAuthorization: true
+  }
+})) // SwaggerUI for API documents
 
 // Mount modular routes
 app.use('/api/auth', authRoutes)
