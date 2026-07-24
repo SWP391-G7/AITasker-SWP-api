@@ -7,11 +7,14 @@
  */
 const express = require('express');
 const router = express.Router();
-const { createReview, getReviewByTargetId } = require('../controllers/reviewController');
+const { createReview, getReviewByTargetId, getProjectReviewStatus } = require('../controllers/reviewController');
 const { protect } = require('../middleware/authMiddleware');
 
 // Route to submit a review (Requires auth)
 router.post('/', protect, createReview);
+
+// Route to check project review status for logged-in user
+router.get('/project/:projectId/status', protect, getProjectReviewStatus);
 
 // Route to get reviews by target user ID (Public)
 router.get('/target/:targetId', getReviewByTargetId);

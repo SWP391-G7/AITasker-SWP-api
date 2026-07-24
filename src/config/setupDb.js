@@ -353,10 +353,14 @@ async function initDatabase() {
         id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
         creator_id UUID REFERENCES users(id) ON DELETE CASCADE,
         target_id UUID REFERENCES users(id) ON DELETE CASCADE,
+        project_id UUID REFERENCES projects(id) ON DELETE CASCADE,
+        stars INT DEFAULT 5,
         review TEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
     `);
+    await client.query('ALTER TABLE review ADD COLUMN IF NOT EXISTS project_id UUID REFERENCES projects(id) ON DELETE CASCADE;');
+    await client.query('ALTER TABLE review ADD COLUMN IF NOT EXISTS stars INT DEFAULT 5;');
 
     // Ensure images and video_link columns exist in services table
     console.log('Ensuring services table has "images" and "video_link" columns...');
