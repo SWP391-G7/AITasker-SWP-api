@@ -224,6 +224,8 @@ CREATE TABLE review (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     creator_id UUID REFERENCES users(id) ON DELETE CASCADE,
     target_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    project_id UUID REFERENCES projects(id) ON DELETE CASCADE,
+    stars INT DEFAULT 5,
     review TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
